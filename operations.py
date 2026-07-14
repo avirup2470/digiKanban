@@ -2,22 +2,22 @@ import sqlite3
 
 DB_PATH = 'inventory.db'
 
-def add_part(name, description, initial_qty=0, location=None, fifo=None):
+def add_part(id,name, description, initial_qty=0, location=None, fifo=100):
     """Inserts a new part into the Part table."""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("PRAGMA foreign_keys = ON;")
     
     cursor.execute('''
-        INSERT INTO Part (name, description, total_quan, location, fifo)
-        VALUES (?, ?, ?, ?, ?)
-    ''', (name, description, initial_qty, location, fifo))
+        INSERT INTO Part (id,name, description, total_quantity, location, fifo)
+        VALUES (?,?, ?, ?, ?, ?)
+    ''', (id, name, description, initial_qty, location, fifo))
     
-    part_id = cursor.lastrowid
+
     conn.commit()
     conn.close()
-    print(f"Part '{name}' created successfully with ID: {part_id}")
-    return part_id
+    print(f"Part '{name}' created successfully with ID: {id}")
+    return id
 
 def create_card(part_id, quantity, location, activation='false', trolly_no=None, trolly_type=None):
     """Creates a tracking card bound to a specific part, initializing FIFO flags."""
