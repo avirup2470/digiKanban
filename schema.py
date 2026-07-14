@@ -19,12 +19,12 @@ def init_db(db_path='inventory.db'):
     # Schema properties: id, name, description, total_quan, location, fifo
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS Part (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
             description TEXT,
-            total_quan INTEGER DEFAULT 0,
+            total_quantity INTEGER DEFAULT 0,
             location TEXT,
-            fifo TEXT
+            fifo INTEGER DEFAULT 1
         )
     ''')
     
@@ -52,7 +52,7 @@ def init_db(db_path='inventory.db'):
         CREATE TABLE IF NOT EXISTS Event (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             card_id INTEGER,
-            part_id INTEGER,
+            part_id TEXT,
             location TEXT,
             quantity INTEGER,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -67,7 +67,7 @@ def init_db(db_path='inventory.db'):
         CREATE TABLE IF NOT EXISTS Task (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             time DATETIME DEFAULT CURRENT_TIMESTAMP,
-            part_id INTEGER,
+            part_id TEXT,
             target INTEGER NOT NULL,
             initial INTEGER DEFAULT 0,
             current INTEGER DEFAULT 0,
@@ -81,7 +81,7 @@ def init_db(db_path='inventory.db'):
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS FifoStats (
             location TEXT,
-            part_id INTEGER,
+            part_id TEXT,
             month_year TEXT,
             total_count INTEGER DEFAULT 0,
             fifo_count INTEGER DEFAULT 0,
