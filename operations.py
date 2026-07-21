@@ -74,7 +74,7 @@ def get_current_status():
 
     # 1. Parts
     print("\n--- CURRENT PART STOCK ---")
-    cursor.execute("SELECT id, name, total_quan, location FROM Part")
+    cursor.execute("SELECT id, name, total_quantity, location FROM Part")
     for row in cursor.fetchall():
         print(f"ID {row[0]}: {row[1]} | Qty: {row[2]} | Location: {row[3]}")
         

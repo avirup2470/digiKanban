@@ -6,7 +6,7 @@ from flask import Flask, request, jsonify, send_from_directory
 
 app = Flask(__name__)
 DB_PATH = 'inventory.db'
-
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 def get_db_connection():
     """
     Establishes an SQLite connection with active foreign key tracking.
@@ -164,13 +164,15 @@ def calculate_fifo_audit(cursor, current_card_id, part_id, arrival_location):
 @app.route('/')
 def serve_index():
     """Serves the front-end dashboard interface."""
-    return send_from_directory('public', 'cardRegister.html')
+    return send_from_directory(BASE_DIR,'index.html')
 
 @app.route('/public/<path:filename>')
 def serve_public(filename):
     """Serves static client assets."""
     return send_from_directory('public', filename)
-
+@app.route('/inventory.db')
+def serve_db():
+    return send_from_directory('.', 'inventory.db', mimetype='application/x-sqlite3')
 
 # --- REST API ENDPOINTS ---
 

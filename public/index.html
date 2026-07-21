@@ -1,0 +1,1624 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-slate-900">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SQLite Inventory Database Browser</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#f0f7ff',
+                            100: '#e0effe',
+                            500: '#3b82f6',
+                            600: '#2563eb',
+                            700: '#1d4ed8',
+                            900: '#1e3a8a',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- sql.js WebAssembly Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js"></script>
+    <style>
+        /* Custom scrollbar for database tables */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1e293b;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #475569;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #64748b;
+        }
+    </style>
+</head>
+<body class="h-full text-slate-100 flex flex-col font-sans">
+
+    <!-- Top Navigation Bar -->
+    <header class="bg-slate-950 border-b border-slate-800 shrink-0 px-6 py-4 flex flex-col sm:flex-row justify-between items-center gap-4">
+        <div class="flex items-center gap-3">
+            <div class="p-2.5 bg-brand-600 rounded-lg text-white shadow-lg shadow-brand-500/20">
+                <i class="fa-solid fa-database text-xl"></i>
+            </div>
+            <div>
+                <h1 class="font-bold text-lg leading-tight flex items-center gap-2">
+                    SQLite Inventory Browser 
+                    <span id="db-badge" class="text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 font-normal">No DB Loaded</span>
+                </h1>
+                <p class="text-xs text-slate-400">View, query, and manage your SQLite inventory.db data</p>
+            </div>
+        </div>
+        <div class="flex items-center gap-3 w-full sm:w-auto justify-end">
+            <!-- Hidden File Input -->
+            <input type="file" id="db-file-input" accept=".db,.sqlite,.sqlite3" class="hidden">
+            
+            <button onclick="document.getElementById('db-file-input').click()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-sm font-semibold transition-all flex items-center gap-2 border border-slate-700">
+                <i class="fa-solid fa-file-import"></i> Upload DB
+            </button>
+            <button onclick="loadMockDatabase()" class="px-4 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-lg text-sm font-semibold transition-all flex items-center gap-2 shadow-lg shadow-brand-500/10">
+                <i class="fa-solid fa-wand-magic-sparkles"></i> Demo Database
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Workspace Container -->
+    <main class="grow flex flex-col lg:flex-row overflow-hidden relative">
+        
+        <!-- App Notifications / Status Overlay -->
+        <div id="status-toast" class="hidden fixed bottom-6 right-6 z-50 max-w-sm p-4 rounded-xl border shadow-2xl transition-all duration-300 flex items-start gap-3">
+            <span id="toast-icon" class="text-lg mt-0.5"></span>
+            <div>
+                <h4 id="toast-title" class="font-bold text-sm"></h4>
+                <p id="toast-desc" class="text-xs text-slate-300 mt-1"></p>
+            </div>
+            <button onclick="hideToast()" class="ml-auto text-slate-400 hover:text-slate-100"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+
+        <!-- Sidebar: Table Navigator & DB Info -->
+        <aside class="w-full lg:w-80 bg-slate-950 border-r border-slate-800 flex flex-col shrink-0">
+            <!-- Database File Info Panel -->
+            <div class="p-4 border-b border-slate-800 bg-slate-900/50">
+                <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Active Database File</h3>
+                <div id="db-info-card" class="p-3 bg-slate-900 border border-slate-800 rounded-lg flex items-center gap-3">
+                    <div class="text-2xl text-slate-500"><i class="fa-solid fa-file-invoice"></i></div>
+                    <div class="overflow-hidden">
+                        <p id="info-filename" class="font-semibold text-sm truncate text-slate-300">No database active</p>
+                        <p id="info-filesize" class="text-xs text-slate-500">0 KB — Local Engine</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- List of Tables -->
+            <div class="grow flex flex-col overflow-hidden">
+                <div class="p-4 flex justify-between items-center shrink-0">
+                    <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider">Database Tables</h3>
+                    <span id="table-count" class="text-xs bg-slate-800 text-slate-400 px-2 py-0.5 rounded-full font-semibold">0</span>
+                </div>
+                <div id="table-list-container" class="grow overflow-y-auto px-2 pb-4 space-y-1">
+                    <!-- Placeholder state when no tables exist -->
+                    <div id="no-tables-placeholder" class="text-center py-8 px-4 text-slate-500 text-sm">
+                        <i class="fa-solid fa-folder-open text-2xl mb-2 block"></i>
+                        No tables discovered. Load a database to explore tables.
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Workspace: Dashboard / Query / Table Explorer -->
+        <section class="grow flex flex-col overflow-hidden bg-slate-900">
+            
+            <!-- Tab Navigation Header -->
+            <div class="bg-slate-950 border-b border-slate-800 px-6 flex justify-between items-center shrink-0">
+                <div class="flex gap-1">
+                    <button onclick="switchTab('dashboard')" id="tab-btn-dashboard" class="px-4 py-3.5 text-sm font-semibold border-b-2 border-brand-500 text-brand-400 transition-all flex items-center gap-2">
+                        <i class="fa-solid fa-chart-pie"></i> Inventory Dashboard
+                    </button>
+                    <button onclick="switchTab('explorer')" id="tab-btn-explorer" class="px-4 py-3.5 text-sm font-semibold border-b-2 border-transparent text-slate-400 hover:text-slate-200 hover:border-slate-700 transition-all flex items-center gap-2">
+                        <i class="fa-solid fa-table"></i> Table Explorer
+                    </button>
+                    <button onclick="switchTab('query')" id="tab-btn-query" class="px-4 py-3.5 text-sm font-semibold border-b-2 border-transparent text-slate-400 hover:text-slate-200 hover:border-slate-700 transition-all flex items-center gap-2">
+                        <i class="fa-solid fa-terminal"></i> SQL Studio
+                    </button>
+                </div>
+                <div class="text-xs text-slate-500 hidden sm:block">
+                    Powered by SQLite WASM engine
+                </div>
+            </div>
+
+            <!-- Tab Content Wrapper -->
+            <div class="grow overflow-y-auto p-6 relative">
+                
+                <!-- UNLOADED BLANK STATE -->
+                <div id="unloaded-overlay" class="absolute inset-0 bg-slate-900/95 z-40 flex flex-col justify-center items-center p-8 text-center">
+                    <div class="max-w-md bg-slate-950 p-8 rounded-2xl border border-slate-800 shadow-2xl relative overflow-hidden">
+                        <!-- Decorative glow -->
+                        <div class="absolute -top-10 -left-10 w-40 h-40 bg-brand-500/10 blur-3xl rounded-full"></div>
+                        
+                        <div class="w-16 h-16 bg-slate-900 border border-slate-800 text-brand-500 rounded-2xl flex items-center justify-center text-2xl mx-auto mb-6 shadow-inner">
+                            <i class="fa-solid fa-cubes-stacked"></i>
+                        </div>
+                        <h2 class="text-xl font-bold text-slate-100 mb-2">Connect to SQLite Database</h2>
+                        <p class="text-sm text-slate-400 mb-6">
+                            We will try to auto-discover an <strong>inventory.db</strong> file in your local directory. Otherwise, upload your database file or load our high-quality template to test features.
+                        </p>
+                        
+                        <!-- Drag-and-drop zone -->
+                        <div id="drop-zone" class="border-2 border-dashed border-slate-700 hover:border-brand-500 bg-slate-900/50 hover:bg-slate-900 p-6 rounded-xl transition-all cursor-pointer mb-6 group">
+                            <i class="fa-solid fa-cloud-arrow-up text-3xl text-slate-500 group-hover:text-brand-400 mb-2 block transition-all"></i>
+                            <span class="text-sm text-slate-300 font-medium block">Drag & Drop Database File Here</span>
+                            <span class="text-xs text-slate-500 block mt-1">Supports .db, .sqlite, .sqlite3 files</span>
+                        </div>
+
+                        <!-- Error/Warning message if auto-fetch or upload failed -->
+                        <div id="db-error-alert" class="hidden mb-6 p-4 rounded-xl border bg-rose-500/10 border-rose-500/20 text-rose-300 text-xs text-left space-y-2">
+                            <div class="font-bold flex items-center gap-1.5 text-rose-400">
+                                <i class="fa-solid fa-triangle-exclamation"></i> Invalid Database File Detected
+                            </div>
+                            <p id="db-error-message">The file provided does not match the valid structure of a SQLite database disk image.</p>
+                            <p class="text-slate-400">
+                                <strong class="text-slate-200">Tip:</strong> Ensure <code class="font-mono bg-slate-950 px-1 py-0.5 rounded text-rose-400 text-[11px]">inventory.db</code> physically exists, is not empty, and is not corrupted/malformed.
+                            </p>
+                        </div>
+
+                        <div class="flex flex-col sm:flex-row gap-3 justify-center">
+                            <button onclick="document.getElementById('db-file-input').click()" class="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-100 text-sm font-semibold rounded-lg transition-all border border-slate-700 flex items-center justify-center gap-2">
+                                <i class="fa-solid fa-folder-open"></i> Browse Files
+                            </button>
+                            <button onclick="loadMockDatabase()" class="px-5 py-2.5 bg-brand-600 hover:bg-brand-500 text-white text-sm font-semibold rounded-lg transition-all flex items-center justify-center gap-2 shadow-lg shadow-brand-500/15">
+                                <i class="fa-solid fa-sparkles"></i> Load Demo Inventory
+                            </button>
+                        </div>
+                        
+                        <div id="loading-spinner" class="hidden mt-6 text-brand-400 text-sm flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-spinner animate-spin"></i> Initializing SQLite Engine...
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 1: DASHBOARD -->
+                <div id="tab-content-dashboard" class="space-y-6">
+                    <!-- Stats Blocks -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <div class="bg-slate-950 p-5 rounded-xl border border-slate-800 shadow-md">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Total Unique Products</p>
+                                    <h3 id="stat-total-products" class="text-3xl font-extrabold text-slate-100 mt-2">0</h3>
+                                </div>
+                                <div class="p-3 bg-blue-500/10 text-blue-400 rounded-lg"><i class="fa-solid fa-box text-lg"></i></div>
+                            </div>
+                            <div class="text-xs text-slate-500 mt-3 flex items-center gap-1">
+                                <i class="fa-solid fa-info-circle text-brand-500"></i> From active product tables
+                            </div>
+                        </div>
+
+                        <div class="bg-slate-950 p-5 rounded-xl border border-slate-800 shadow-md">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Total Stock Quantity</p>
+                                    <h3 id="stat-total-qty" class="text-3xl font-extrabold text-slate-100 mt-2">0</h3>
+                                </div>
+                                <div class="p-3 bg-emerald-500/10 text-emerald-400 rounded-lg"><i class="fa-solid fa-cubes text-lg"></i></div>
+                            </div>
+                            <div class="text-xs text-slate-500 mt-3 flex items-center gap-1">
+                                <i class="fa-solid fa-chart-line text-emerald-400"></i> Sum of all active items
+                            </div>
+                        </div>
+
+                        <div class="bg-slate-950 p-5 rounded-xl border border-slate-800 shadow-md">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Estimated Asset Value</p>
+                                    <h3 id="stat-total-value" class="text-3xl font-extrabold text-slate-100 mt-2">$0.00</h3>
+                                </div>
+                                <div class="p-3 bg-violet-500/10 text-violet-400 rounded-lg"><i class="fa-solid fa-wallet text-lg"></i></div>
+                            </div>
+                            <div class="text-xs text-slate-500 mt-3 flex items-center gap-1">
+                                <i class="fa-solid fa-tag text-violet-400"></i> Based on quantity & price
+                            </div>
+                        </div>
+
+                        <div class="bg-slate-950 p-5 rounded-xl border border-slate-800 shadow-md">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Low Stock Alerts</p>
+                                    <h3 id="stat-low-stock" class="text-3xl font-extrabold text-rose-400 mt-2">0</h3>
+                                </div>
+                                <div class="p-3 bg-rose-500/10 text-rose-400 rounded-lg"><i class="fa-solid fa-triangle-exclamation text-lg"></i></div>
+                            </div>
+                            <div class="text-xs text-rose-500/80 mt-3 flex items-center gap-1 font-semibold">
+                                <i class="fa-solid fa-circle-exclamation"></i> Action required soon
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Two-Column Analytics Layout -->
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <!-- Left Panel: Recent Transactions / Actions -->
+                        <div class="lg:col-span-2 bg-slate-950 p-6 rounded-xl border border-slate-800 flex flex-col min-h-[400px]">
+                            <div class="flex justify-between items-center mb-4">
+                                <h3 class="font-bold text-slate-100 flex items-center gap-2">
+                                    <i class="fa-solid fa-clock-rotate-left text-brand-400"></i> Recent Inventory Ledger
+                                </h3>
+                                <button onclick="viewFullTable('inventory_transactions')" class="text-xs text-brand-400 hover:text-brand-300 font-semibold hover:underline">View All</button>
+                            </div>
+                            <div class="grow overflow-x-auto">
+                                <table class="w-full text-left text-sm border-collapse">
+                                    <thead>
+                                        <tr class="border-b border-slate-800 text-slate-400 text-xs uppercase tracking-wider">
+                                            <th class="py-3 px-2">Date/Time</th>
+                                            <th class="py-3 px-2">SKU / Item</th>
+                                            <th class="py-3 px-2">Type</th>
+                                            <th class="py-3 px-2 text-right">Quantity</th>
+                                            <th class="py-3 px-2">Notes</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="dashboard-transactions-body" class="divide-y divide-slate-800/40 text-slate-300">
+                                        <tr>
+                                            <td colspan="5" class="py-8 text-center text-slate-500 text-xs">
+                                                No direct transaction table found. Load a matching inventory schema to render.
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Right Panel: Category Valuation Breakdown -->
+                        <div class="bg-slate-950 p-6 rounded-xl border border-slate-800 flex flex-col">
+                            <h3 class="font-bold text-slate-100 mb-4 flex items-center gap-2">
+                                <i class="fa-solid fa-pie-chart text-brand-400"></i> Category Valuation
+                            </h3>
+                            <div class="grow flex flex-col justify-between">
+                                <div id="category-distribution-container" class="space-y-4 my-2">
+                                    <!-- Dynamic Category Progress Bars -->
+                                    <div class="text-center py-12 text-slate-500 text-xs">
+                                        No categories found or categories schema mismatch.
+                                    </div>
+                                </div>
+                                <div class="bg-slate-900 p-3 rounded-lg border border-slate-800/60 text-xs text-slate-400 mt-4">
+                                    <i class="fa-solid fa-lightbulb text-amber-400 mr-1"></i>
+                                    Values represent product stock multiplied by active unit cost.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Critical Low Stock Alerts Table -->
+                    <div class="bg-slate-950 p-6 rounded-xl border border-slate-800">
+                        <h3 class="font-bold text-slate-100 mb-4 flex items-center gap-2 text-rose-400">
+                            <i class="fa-solid fa-triangle-exclamation"></i> Low Stock & Reorder Levels Alert
+                        </h3>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left text-sm border-collapse">
+                                <thead>
+                                    <tr class="border-b border-slate-800 text-slate-400 text-xs uppercase tracking-wider">
+                                        <th class="py-3 px-2">Product Name</th>
+                                        <th class="py-3 px-2">SKU</th>
+                                        <th class="py-3 px-2">Current Stock</th>
+                                        <th class="py-3 px-2">Reorder Threshold</th>
+                                        <th class="py-3 px-2">Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="dashboard-low-stock-body" class="divide-y divide-slate-800/40 text-slate-300">
+                                    <tr>
+                                        <td colspan="5" class="py-6 text-center text-slate-500 text-xs">
+                                            No critical low stock alerts found.
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 2: TABLE EXPLORER -->
+                <div id="tab-content-explorer" class="hidden space-y-4">
+                    <!-- Explorer Toolbar Controls -->
+                    <div class="flex flex-col md:flex-row gap-4 justify-between items-start md:items-center bg-slate-950 p-4 rounded-xl border border-slate-800">
+                        <div class="flex items-center gap-2">
+                            <span class="text-sm font-semibold text-slate-400">Viewing Table:</span>
+                            <span id="active-explorer-table" class="bg-brand-600/20 text-brand-400 border border-brand-500/30 px-3 py-1 rounded-lg font-bold text-sm">None Selected</span>
+                        </div>
+                        <div class="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+                            <!-- Search Input -->
+                            <div class="relative grow sm:grow-0">
+                                <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+                                <input type="text" id="table-search" placeholder="Search rows..." class="pl-9 pr-4 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs placeholder-slate-500 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 text-slate-200 w-full sm:w-64">
+                            </div>
+                            <!-- Export Tools -->
+                            <div class="flex items-center gap-2">
+                                <button onclick="exportCurrentTable('csv')" class="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all">
+                                    <i class="fa-solid fa-file-csv"></i> CSV
+                                </button>
+                                <button onclick="exportCurrentTable('json')" class="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all">
+                                    <i class="fa-solid fa-file-code"></i> JSON
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Explorer Layout Grid -->
+                    <div class="grid grid-cols-1 xl:grid-cols-4 gap-6 items-start">
+                        <!-- Table Content Grid Area -->
+                        <div class="xl:col-span-3 bg-slate-950 rounded-xl border border-slate-800 shadow-md flex flex-col min-h-[500px]">
+                            <!-- Loading / Empty View -->
+                            <div id="explorer-placeholder" class="py-24 text-center text-slate-500 grow flex flex-col justify-center items-center">
+                                <i class="fa-solid fa-table-list text-4xl mb-4 text-slate-600"></i>
+                                <h3 class="text-base font-bold text-slate-300">Select a Table</h3>
+                                <p class="text-xs text-slate-500 max-w-sm mt-1">Choose a database table from the sidebar navigation to inspect individual columns, values, and search data.</p>
+                            </div>
+
+                            <!-- Data Table View -->
+                            <div id="explorer-table-container" class="hidden flex flex-col grow">
+                                <div class="grow overflow-x-auto">
+                                    <table id="explorer-data-table" class="w-full text-left text-xs border-collapse">
+                                        <thead>
+                                            <tr id="explorer-table-headers" class="border-b border-slate-800 bg-slate-900/60 text-slate-400 uppercase tracking-wider text-[11px]">
+                                                <!-- Dynamic headers loaded here -->
+                                            </tr>
+                                        </thead>
+                                        <tbody id="explorer-table-body" class="divide-y divide-slate-800/40 text-slate-300">
+                                            <!-- Dynamic rows loaded here -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                                
+                                <!-- Table Footer Pagination -->
+                                <div class="p-4 border-t border-slate-800/80 bg-slate-950 flex flex-col sm:flex-row justify-between items-center gap-3 shrink-0">
+                                    <div class="text-xs text-slate-400">
+                                        Showing <span id="paginated-start-row" class="font-semibold text-slate-200">0</span> to <span id="paginated-end-row" class="font-semibold text-slate-200">0</span> of <span id="paginated-total-rows" class="font-semibold text-slate-200">0</span> rows
+                                    </div>
+                                    <div class="flex items-center gap-3">
+                                        <!-- Rows Per Page Selection -->
+                                        <div class="flex items-center gap-1.5">
+                                            <span class="text-[11px] text-slate-500">Rows:</span>
+                                            <select id="paginated-rows-limit" onchange="resetPagination()" class="bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-xs text-slate-300 focus:outline-none focus:border-brand-500">
+                                                <option value="10">10</option>
+                                                <option value="25" selected>25</option>
+                                                <option value="50">50</option>
+                                                <option value="100">100</option>
+                                            </select>
+                                        </div>
+                                        <!-- Pagination Nav Buttons -->
+                                        <div class="flex items-center gap-1">
+                                            <button onclick="navigatePage(-1)" id="prev-page-btn" class="p-1.5 bg-slate-900 border border-slate-700 text-slate-400 hover:text-slate-100 disabled:opacity-40 disabled:cursor-not-allowed rounded transition-all">
+                                                <i class="fa-solid fa-chevron-left text-xs"></i>
+                                            </button>
+                                            <span class="text-xs font-semibold px-2 text-slate-300">
+                                                Page <span id="current-page-num">1</span>
+                                            </span>
+                                            <button onclick="navigatePage(1)" id="next-page-btn" class="p-1.5 bg-slate-900 border border-slate-700 text-slate-400 hover:text-slate-100 disabled:opacity-40 disabled:cursor-not-allowed rounded transition-all">
+                                                <i class="fa-solid fa-chevron-right text-xs"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Table Schema Card Details (Right Panel) -->
+                        <div id="table-schema-panel" class="hidden bg-slate-950 p-5 rounded-xl border border-slate-800 shadow-md space-y-4">
+                            <h3 class="font-bold text-slate-100 text-sm flex items-center gap-2 border-b border-slate-800 pb-2.5">
+                                <i class="fa-solid fa-code text-brand-400"></i> SQL Schema
+                            </h3>
+                            <div>
+                                <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Create Definition</h4>
+                                <pre class="p-3 bg-slate-900 border border-slate-800 rounded-lg text-[11px] font-mono text-emerald-400 whitespace-pre-wrap overflow-x-auto" id="schema-sql-definition"></pre>
+                            </div>
+                            <div class="border-t border-slate-800 pt-3">
+                                <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Column List</h4>
+                                <div id="schema-column-list" class="space-y-1.5">
+                                    <!-- Schema columns injection -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 3: SQL STUDIO -->
+                <div id="tab-content-query" class="hidden space-y-6">
+                    <!-- Query Creator Studio UI -->
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+                        <!-- Left Panel: SQL Editor -->
+                        <div class="lg:col-span-2 bg-slate-950 rounded-xl border border-slate-800 p-5 flex flex-col space-y-4">
+                            <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+                                <h3 class="font-bold text-slate-100 text-sm flex items-center gap-2">
+                                    <i class="fa-solid fa-terminal text-brand-400"></i> SQL Statement Workspace
+                                </h3>
+                                <div class="flex items-center gap-2">
+                                    <button onclick="clearQueryEditor()" class="text-xs text-slate-400 hover:text-slate-200 transition-all">Clear</button>
+                                </div>
+                            </div>
+
+                            <!-- Text Editor Wrapper -->
+                            <div class="relative">
+                                <textarea id="sql-query-editor" rows="6" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-4 font-mono text-xs text-emerald-400 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 placeholder-slate-600 leading-relaxed" placeholder="SELECT * FROM products WHERE quantity < reorder_level LIMIT 10;"></textarea>
+                            </div>
+
+                            <div class="flex justify-between items-center pt-2">
+                                <div class="text-xs text-slate-500">
+                                    <i class="fa-solid fa-circle-question text-slate-600"></i> Standard SQLite syntax is supported.
+                                </div>
+                                <button onclick="runCustomQuery()" class="px-5 py-2.5 bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold rounded-lg flex items-center gap-2 shadow-lg shadow-brand-500/15 transition-all">
+                                    <i class="fa-solid fa-play"></i> Execute Query
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Right Panel: Template Helpers & Snippets -->
+                        <div class="bg-slate-950 rounded-xl border border-slate-800 p-5 space-y-4">
+                            <h3 class="font-bold text-slate-100 text-sm flex items-center gap-2 border-b border-slate-800 pb-2.5">
+                                <i class="fa-solid fa-lightbulb text-amber-400"></i> Query Snippets
+                            </h3>
+                            <p class="text-xs text-slate-400">Click a helper snippet below to pre-load it into your active query editor workspace:</p>
+                            <div class="space-y-2">
+                                <button onclick="loadQueryTemplate('lowStock')" class="w-full text-left p-2.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 rounded-lg transition-all flex justify-between items-center group">
+                                    <div>
+                                        <span class="text-xs font-bold text-slate-200 block">Critical Low Stock Items</span>
+                                        <span class="text-[10px] text-slate-500 block">Find items needing urgent replacement</span>
+                                    </div>
+                                    <i class="fa-solid fa-chevron-right text-xs text-slate-600 group-hover:text-brand-400"></i>
+                                </button>
+
+                                <button onclick="loadQueryTemplate('valuation')" class="w-full text-left p-2.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 rounded-lg transition-all flex justify-between items-center group">
+                                    <div>
+                                        <span class="text-xs font-bold text-slate-200 block">Stock Valuation by Category</span>
+                                        <span class="text-[10px] text-slate-500 block">Aggregate total catalog values</span>
+                                    </div>
+                                    <i class="fa-solid fa-chevron-right text-xs text-slate-600 group-hover:text-brand-400"></i>
+                                </button>
+
+                                <button onclick="loadQueryTemplate('recentTransactions')" class="w-full text-left p-2.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 rounded-lg transition-all flex justify-between items-center group">
+                                    <div>
+                                        <span class="text-xs font-bold text-slate-200 block">Recent Stock Transactions</span>
+                                        <span class="text-[10px] text-slate-500 block">List details of chronological audits</span>
+                                    </div>
+                                    <i class="fa-solid fa-chevron-right text-xs text-slate-600 group-hover:text-brand-400"></i>
+                                </button>
+
+                                <button onclick="loadQueryTemplate('suppliers')" class="w-full text-left p-2.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 rounded-lg transition-all flex justify-between items-center group">
+                                    <div>
+                                        <span class="text-xs font-bold text-slate-200 block">Active Supplier Index</span>
+                                        <span class="text-[10px] text-slate-500 block">Review full list of suppliers</span>
+                                    </div>
+                                    <i class="fa-solid fa-chevron-right text-xs text-slate-600 group-hover:text-brand-400"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Query Result Section -->
+                    <div class="bg-slate-950 rounded-xl border border-slate-800 p-5 flex flex-col min-h-[300px]">
+                        <div class="flex justify-between items-center border-b border-slate-800 pb-3 mb-4">
+                            <h3 class="font-bold text-slate-100 text-sm flex items-center gap-2">
+                                <i class="fa-solid fa-list-check text-emerald-400"></i> Execution Results
+                            </h3>
+                            <div id="query-export-actions" class="hidden flex items-center gap-2">
+                                <button onclick="exportQueryResults('csv')" class="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 rounded text-[11px] font-semibold flex items-center gap-1">
+                                    <i class="fa-solid fa-file-csv"></i> Export CSV
+                                </button>
+                                <button onclick="exportQueryResults('json')" class="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 rounded text-[11px] font-semibold flex items-center gap-1">
+                                    <i class="fa-solid fa-file-code"></i> Export JSON
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Results Content Shell -->
+                        <div class="grow overflow-x-auto min-h-[150px]">
+                            <!-- Empty Result/Loading Panel -->
+                            <div id="query-result-placeholder" class="py-12 text-center text-slate-500 h-full flex flex-col justify-center items-center">
+                                <i class="fa-solid fa-wand-magic text-3xl mb-3 text-slate-600"></i>
+                                <h4 class="text-xs font-bold text-slate-300">Workspace Empty</h4>
+                                <p class="text-[11px] text-slate-500 max-w-xs mt-1">Compose a valid SQLite query, click execute, and view database output tables instantly.</p>
+                            </div>
+
+                            <!-- Error Message Display -->
+                            <div id="query-error-display" class="hidden p-4 bg-rose-500/10 border border-rose-500/20 text-rose-400 rounded-lg font-mono text-xs whitespace-pre-wrap"></div>
+
+                            <!-- Live Active Result Grid -->
+                            <table id="query-result-table" class="hidden w-full text-left text-xs border-collapse">
+                                <thead class="bg-slate-900 text-slate-400 uppercase tracking-wider text-[11px] border-b border-slate-800" id="query-result-header"></thead>
+                                <tbody class="divide-y divide-slate-800/40 text-slate-300" id="query-result-body"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </section>
+    </main>
+
+    <!-- JavaScript Engine & Operations -->
+    <script>
+        let db = null;
+        let SQLInstance = null;
+        let activeTable = "";
+        let currentTab = "dashboard";
+        
+        // Explorer state tracking
+        let tableSchemaInfo = {};
+        let tableData = [];
+        let filteredTableData = [];
+        let activePage = 1;
+        let recordsPerPage = 25;
+
+        // Custom query result caching for exporting
+        let lastQueryColumns = [];
+        let lastQueryValues = [];
+
+        // Application Auto-Initialization on Load
+        window.addEventListener('DOMContentLoaded', async () => {
+            // Setup Drag & Drop Listeners
+            setupDragAndDrop();
+
+            // Setup custom file select listener
+            document.getElementById('db-file-input').addEventListener('change', handleFileSelect);
+
+            // Initialize sql.js WebAssembly
+            try {
+                document.getElementById('loading-spinner').classList.remove('hidden');
+                
+                // Initialize SQL.js with correct remote WASM bindings
+                SQLInstance = await initSqlJs({
+                    locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}`
+                });
+
+                document.getElementById('loading-spinner').classList.add('hidden');
+                
+                // Try auto-fetching inventory.db relative path
+                await tryAutoFetchDatabase();
+            } catch (err) {
+                console.error("Initialization failure", err);
+                showToast("Engine Error", "Could not initialize SQLite WebAssembly. Please reload page.", "error");
+                document.getElementById('loading-spinner').innerHTML = `<span class="text-rose-400"><i class="fa-solid fa-exclamation-triangle"></i> Engine load failed</span>`;
+            }
+        });
+
+        // Verifies SQLite Magic Signature "SQLite format 3\0" (First 16 bytes)
+        function isValidSQLite(arrayBuffer) {
+            if (!arrayBuffer || arrayBuffer.byteLength < 16) return false;
+            
+            // Check signature bytes
+            const bytes = new Uint8Array(arrayBuffer.slice(0, 16));
+            const magicStr = "SQLite format 3\0";
+            
+            for (let i = 0; i < 15; i++) {
+                if (bytes[i] !== magicStr.charCodeAt(i)) {
+                    return false;
+                }
+            }
+            return bytes[15] === 0;
+        }
+
+        // Try to fetch inventory.db silently in local context
+        async function tryAutoFetchDatabase() {
+            try {
+                const pathsToTry = ['inventory.db', '../inventory.db', './inventory.db'];
+                let response = null;
+                let pathFound = "";
+
+                for (let path of pathsToTry) {
+                    try {
+                        const res = await fetch(path);
+                        if (res.ok) {
+                            response = res;
+                            pathFound = path;
+                            break;
+                        }
+                    } catch (e) {}
+                }
+
+                if (response) {
+                    const arrayBuffer = await response.arrayBuffer();
+                    
+                    // Crucial verification check: Is the auto-loaded file actually a valid SQLite binary?
+                    if (!isValidSQLite(arrayBuffer)) {
+                        console.warn(`File fetched from ${pathFound} is not a valid SQLite database (likely an HTML 404/Single-Page index redirect page).`);
+                        showDatabaseErrorAlert(
+                            `The auto-discovered file at "${pathFound}" is not a valid SQLite database.`,
+                            "The server responded with an HTML file instead of the actual binary database. This usually happens when the local development server redirects missing file requests (404s) back to an index.html landing page."
+                        );
+                        return;
+                    }
+
+                    try {
+                        const uInt8Array = new Uint8Array(arrayBuffer);
+                        db = new SQLInstance.Database(uInt8Array);
+                        
+                        // Perform a test execution on the sqlite_master to verify it compiles and is healthy
+                        db.exec("SELECT name FROM sqlite_master WHERE type='table' LIMIT 1;");
+                        
+                        // Display success
+                        const name = pathFound.split('/').pop();
+                        onDatabaseLoaded(name, arrayBuffer.byteLength);
+                        showToast("Database Connected", `Auto-loaded ${name} database file successfully!`, "success");
+                    } catch (initErr) {
+                        console.error("The auto-fetched SQLite binary is corrupted/malformed.", initErr);
+                        db = null; // reset to avoid state issues
+                        showDatabaseErrorAlert(
+                            `The auto-discovered database "${pathFound}" is malformed.`,
+                            "The file has a valid SQLite header but failed to compile queries (likely due to unexpected truncation or disk corruption during transfer). Please drag & drop a healthy database, or load the mock database templates."
+                        );
+                    }
+                } else {
+                    console.log("No default database found at auto-discovery paths.");
+                }
+            } catch (err) {
+                console.warn("Auto-fetch error.", err);
+            }
+        }
+
+        // Display errors in the center overlay card
+        function showDatabaseErrorAlert(summary, detailedInfo) {
+            const alertContainer = document.getElementById('db-error-alert');
+            const alertMessage = document.getElementById('db-error-message');
+            
+            alertContainer.classList.remove('hidden');
+            alertMessage.innerHTML = `<strong class="text-slate-100">${summary}</strong><br class="mb-1"/><span class="text-slate-400">${detailedInfo}</span>`;
+            
+            // Highlight drop-zone borders to guide the user to drop a valid replacement
+            document.getElementById('drop-zone').classList.add('border-rose-500/50', 'bg-rose-500/5');
+        }
+
+        function hideDatabaseErrorAlert() {
+            const alertContainer = document.getElementById('db-error-alert');
+            alertContainer.classList.add('hidden');
+            document.getElementById('drop-zone').classList.remove('border-rose-500/50', 'bg-rose-500/5');
+        }
+
+        // Onboard Drag and Drop Engine
+        function setupDragAndDrop() {
+            const dropZone = document.getElementById('drop-zone');
+            
+            // Highlight drop area
+            ['dragenter', 'dragover'].forEach(eventName => {
+                dropZone.addEventListener(eventName, (e) => {
+                    e.preventDefault();
+                    dropZone.classList.add('border-brand-500', 'bg-slate-900');
+                }, false);
+            });
+
+            ['dragleave', 'drop'].forEach(eventName => {
+                dropZone.addEventListener(eventName, (e) => {
+                    e.preventDefault();
+                    dropZone.classList.remove('border-brand-500', 'bg-slate-900');
+                }, false);
+            });
+
+            dropZone.addEventListener('drop', (e) => {
+                const dt = e.dataTransfer;
+                const files = dt.files;
+                if (files.length > 0) {
+                    loadDatabaseFile(files[0]);
+                }
+            });
+            
+            dropZone.addEventListener('click', () => {
+                document.getElementById('db-file-input').click();
+            });
+        }
+
+        // Handle native file selection
+        function handleFileSelect(e) {
+            const file = e.target.files[0];
+            if (file) {
+                loadDatabaseFile(file);
+            }
+        }
+
+        // Parse selected/uploaded file inside inside sql.js
+        function loadDatabaseFile(file) {
+            const reader = new FileReader();
+            reader.onload = function() {
+                try {
+                    const arrayBuffer = this.result;
+
+                    // Verify signature
+                    if (!isValidSQLite(arrayBuffer)) {
+                        showDatabaseErrorAlert(
+                            `"${file.name}" is not a valid SQLite database.`,
+                            "Please upload a binary SQLite3 database file (normally generated with the extension .db, .sqlite, or .sqlite3). Raw text, CSV, or HTML pages cannot be parsed."
+                        );
+                        showToast("Load Failed", "The selected file is not a valid SQLite database.", "error");
+                        return;
+                    }
+
+                    hideDatabaseErrorAlert();
+                    const uInt8Array = new Uint8Array(arrayBuffer);
+                    const tempDb = new SQLInstance.Database(uInt8Array);
+                    
+                    // Test execution check to ensure no malformed tables error out on import
+                    tempDb.exec("SELECT name FROM sqlite_master WHERE type='table' LIMIT 1;");
+                    
+                    db = tempDb;
+                    onDatabaseLoaded(file.name, file.size);
+                    showToast("File Loaded", `Successfully connected to ${file.name}`, "success");
+                } catch (err) {
+                    db = null; // ensure database states are purged
+                    showDatabaseErrorAlert("Database file is malformed.", `${err.message || "An exception occurred during SQLite parsing."} Please check that the file is not corrupted or truncated.`);
+                    showToast("Loading Error", "The SQLite database is malformed or corrupted.", "error");
+                    console.error(err);
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        // Global State Updates when DB matches SQLInstance
+        function onDatabaseLoaded(filename, bytesize) {
+            if (!db) return;
+            
+            // Unveil database
+            document.getElementById('unloaded-overlay').classList.add('hidden');
+            hideDatabaseErrorAlert();
+            
+            // Adjust badges and status text
+            const sizeString = formatBytes(bytesize);
+            document.getElementById('db-badge').innerText = "Online";
+            document.getElementById('db-badge').className = "text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-normal";
+            document.getElementById('info-filename').innerText = filename;
+            document.getElementById('info-filename').title = filename;
+            document.getElementById('info-filesize').innerText = `${sizeString} — SQLite Engine`;
+
+            // Reload sidebar explorer tables safely
+            refreshSidebarTables();
+
+            // Default fallback logic to render standard dashboard safely
+            generateDashboardStats();
+
+            // Set default view table to 'products' if present, otherwise first available
+            const tablesList = getTableList();
+            const firstTable = tablesList[0];
+            if (firstTable) {
+                viewFullTable(tablesList.includes("products") ? "products" : firstTable);
+            }
+        }
+
+        // Generate mock database inside RAM for presentation
+        function loadMockDatabase() {
+            if (!SQLInstance) return;
+            
+            db = new SQLInstance.Database();
+            
+            // Execute mock database build scripts
+            db.run(`
+                CREATE TABLE categories (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    description TEXT
+                );
+
+                CREATE TABLE suppliers (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    contact_name TEXT,
+                    phone TEXT,
+                    email TEXT
+                );
+
+                CREATE TABLE products (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    sku TEXT UNIQUE NOT NULL,
+                    category_id INTEGER,
+                    supplier_id INTEGER,
+                    quantity INTEGER DEFAULT 0,
+                    unit_price REAL DEFAULT 0.0,
+                    reorder_level INTEGER DEFAULT 10,
+                    status TEXT DEFAULT 'ACTIVE',
+                    FOREIGN KEY (category_id) REFERENCES categories(id),
+                    FOREIGN KEY (supplier_id) REFERENCES suppliers(id)
+                );
+
+                CREATE TABLE inventory_transactions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    product_id INTEGER,
+                    type TEXT CHECK(type IN ('IN', 'OUT', 'AUDIT')) NOT NULL,
+                    quantity INTEGER NOT NULL,
+                    transaction_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    notes TEXT,
+                    FOREIGN KEY (product_id) REFERENCES products(id)
+                );
+            `);
+
+            // Seed Mock Data
+            db.run(`
+                INSERT INTO categories (name, description) VALUES 
+                ('Electronics', 'Gadgets, appliances, microcontrollers and computer parts'),
+                ('Office Supplies', 'Pens, paper, notebooks, furniture and file organizers'),
+                ('Apparel', 'Branded uniforms, corporate wear, and protective safety gear'),
+                ('Packaging', 'Shipping boxes, bubble wraps, envelopes, and tape rolls');
+
+                INSERT INTO suppliers (name, contact_name, phone, email) VALUES
+                ('Aegis Tech Corp', 'Alex Mercer', '555-0192', 'sales@aegistech.com'),
+                ('Global Paper & Co', 'Sarah Jenkins', '555-0481', 'orders@globalpaper.co'),
+                ('Infinity Threads', 'Michael Chen', '555-0377', 'mchen@infinitythreads.net'),
+                ('Apex Box Industries', 'Donald Vance', '555-0990', 'dvance@apexbox.com');
+
+                INSERT INTO products (name, sku, category_id, supplier_id, quantity, unit_price, reorder_level, status) VALUES
+                ('QuantumX Wireless Router', 'ELE-WR-092', 1, 1, 45, 89.99, 15, 'ACTIVE'),
+                ('Pro-Ergo Office Chair', 'OFF-CH-381', 2, 2, 8, 149.50, 10, 'ACTIVE'),
+                ('Branded Polo Shirt (Navy)', 'APP-PL-005', 3, 3, 120, 24.99, 30, 'ACTIVE'),
+                ('Heavy Duty Shipping Box (L)', 'PKG-BX-220', 4, 4, 350, 2.45, 100, 'ACTIVE'),
+                ('Micro-USB Power Bank 10k', 'ELE-PB-871', 1, 1, 12, 19.99, 20, 'ACTIVE'),
+                ('Premium Mechanical Pencil', 'OFF-PN-112', 2, 2, 400, 1.20, 50, 'ACTIVE'),
+                ('Waterproof High-Viz Vest', 'APP-VS-499', 3, 3, 5, 34.50, 15, 'ACTIVE'),
+                ('Recycled Packing Bubble Wrap', 'PKG-BW-102', 4, 4, 18, 14.99, 25, 'ACTIVE');
+
+                INSERT INTO inventory_transactions (product_id, type, quantity, transaction_date, notes) VALUES
+                (1, 'IN', 50, '2026-07-01 09:15:00', 'Initial stock purchase order received'),
+                (1, 'OUT', 5, '2026-07-03 14:22:00', 'Order shipment #10294'),
+                (2, 'IN', 10, '2026-07-02 11:00:00', 'New office assembly supplies arrived'),
+                (2, 'OUT', 2, '2026-07-04 16:30:00', 'Replacement setups for IT team'),
+                (5, 'OUT', 8, '2026-07-10 10:45:00', 'Promotional event giveaways'),
+                (6, 'IN', 400, '2026-07-08 08:30:00', 'Restocked stationery category'),
+                (7, 'OUT', 10, '2026-07-12 11:20:00', 'Equipping new operations crew');
+            `);
+
+            onDatabaseLoaded("mock_inventory_demo.db", 65536);
+            showToast("Demo Loaded", "Populated with premium mock inventory tables!", "success");
+        }
+
+        // Read dynamic table names out of sqlite_master schema index
+        function getTableList() {
+            if (!db) return [];
+            try {
+                const res = db.exec("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';");
+                if (res.length > 0) {
+                    return res[0].values.map(row => row[0]);
+                }
+            } catch (err) {
+                console.error("Error reading tables", err);
+            }
+            return [];
+        }
+
+        // Redraw Sidebar list
+        function refreshSidebarTables() {
+            if (!db) return;
+            const container = document.getElementById('table-list-container');
+            const placeholder = document.getElementById('no-tables-placeholder');
+            const counter = document.getElementById('table-count');
+            
+            // Clean active wrapper
+            const elements = container.querySelectorAll('.table-nav-item');
+            elements.forEach(el => el.remove());
+
+            const tables = getTableList();
+            counter.innerText = tables.length;
+
+            if (tables.length === 0) {
+                placeholder.classList.remove('hidden');
+                return;
+            }
+
+            placeholder.classList.add('hidden');
+            
+            tables.forEach(tableName => {
+                // Fetch Row Count of table dynamically for metadata badge
+                let rowCount = 0;
+                try {
+                    const rowRes = db.exec(`SELECT count(*) FROM "${tableName}"`);
+                    if (rowRes.length > 0) rowCount = rowRes[0].values[0][0];
+                } catch (e) {}
+
+                const btn = document.createElement('button');
+                btn.className = `table-nav-item w-full text-left px-3 py-2.5 rounded-lg transition-all flex justify-between items-center group text-sm ${activeTable === tableName ? 'bg-slate-900 border border-slate-800 text-brand-400 font-bold' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'}`;
+                btn.onclick = () => viewFullTable(tableName);
+                btn.innerHTML = `
+                    <span class="flex items-center gap-2 truncate">
+                        <i class="fa-solid ${activeTable === tableName ? 'fa-table-columns text-brand-500' : 'fa-table text-slate-500 group-hover:text-slate-300'}"></i>
+                        <span class="truncate">${tableName}</span>
+                    </span>
+                    <span class="text-xs bg-slate-900 group-hover:bg-slate-800 border border-slate-800 text-slate-400 px-2 py-0.5 rounded-full font-semibold shrink-0">${rowCount}</span>
+                `;
+                container.appendChild(btn);
+            });
+        }
+
+        // View dynamic table selection inside Table Explorer Tab
+        function viewFullTable(tableName) {
+            if (!db) return;
+            activeTable = tableName;
+            switchTab('explorer');
+
+            // Set Table Label
+            document.getElementById('active-explorer-table').innerText = tableName;
+            
+            // Hide placeholder, display table framework
+            document.getElementById('explorer-placeholder').classList.add('hidden');
+            document.getElementById('explorer-table-container').classList.remove('hidden');
+            document.getElementById('table-schema-panel').classList.remove('hidden');
+
+            // Refresh UI Selectors to highlight Active Sidebar Button
+            refreshSidebarTables();
+
+            // Run Schema generation queries
+            fetchTableSchemaDetails(tableName);
+
+            // Fetch Table Row Data
+            fetchTableData(tableName);
+        }
+
+        // Load SQL statement schemas to populate info panel
+        function fetchTableSchemaDetails(tableName) {
+            if (!db) return;
+            try {
+                // Fetch original CREATE TABLE schema statement
+                const sqlRes = db.exec(`SELECT sql FROM sqlite_master WHERE type='table' AND name='${tableName}'`);
+                const createSQL = sqlRes.length > 0 ? sqlRes[0].values[0][0] : `-- No CREATE SQL discovered.`;
+                document.getElementById('schema-sql-definition').innerText = createSQL;
+
+                // Fetch Column information details using pragma query
+                const pragmaRes = db.exec(`PRAGMA table_info('${tableName}')`);
+                const colContainer = document.getElementById('schema-column-list');
+                colContainer.innerHTML = "";
+
+                if (pragmaRes.length > 0) {
+                    const columns = pragmaRes[0].values;
+                    columns.forEach(col => {
+                        const cid = col[0];
+                        const cname = col[1];
+                        const ctype = col[2];
+                        const notnull = col[3];
+                        const pk = col[5];
+
+                        const item = document.createElement('div');
+                        item.className = "flex items-center justify-between p-2 bg-slate-900/60 rounded-lg text-xs border border-slate-800";
+                        item.innerHTML = `
+                            <div class="flex items-center gap-2 truncate">
+                                ${pk ? '<i class="fa-solid fa-key text-amber-500" title="Primary Key"></i>' : '<i class="fa-solid fa-align-left text-slate-500"></i>'}
+                                <span class="font-semibold text-slate-300 truncate" title="${cname}">${cname}</span>
+                            </div>
+                            <span class="font-mono text-[10px] text-slate-400 shrink-0 bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800">${ctype || 'BLOB'}</span>
+                        `;
+                        colContainer.appendChild(item);
+                    });
+                }
+            } catch (err) {
+                console.error("Could not fetch table schema details", err);
+            }
+        }
+
+        // Execute dynamic data retrieval for requested Table name
+        function fetchTableData(tableName) {
+            if (!db) return;
+            try {
+                const res = db.exec(`SELECT * FROM "${tableName}"`);
+                
+                if (res.length > 0) {
+                    const columns = res[0].columns;
+                    const values = res[0].values;
+                    
+                    // Map values array into friendly object array
+                    tableData = values.map(valArray => {
+                        const obj = {};
+                        columns.forEach((col, idx) => {
+                            obj[col] = valArray[idx];
+                        });
+                        return obj;
+                    });
+                } else {
+                    tableData = [];
+                }
+
+                // Reset filters, queries, pagination
+                document.getElementById('table-search').value = "";
+                resetPagination();
+            } catch (err) {
+                showToast("Read Error", "Could not load data from this table.", "error");
+                console.error(err);
+            }
+        }
+
+        // Filter and Paginate Table contents
+        function renderExplorerTable() {
+            const tableBody = document.getElementById('explorer-table-body');
+            const tableHeaders = document.getElementById('explorer-table-headers');
+            
+            tableBody.innerHTML = "";
+            tableHeaders.innerHTML = "";
+
+            if (tableData.length === 0) {
+                tableBody.innerHTML = `<tr><td colspan="100%" class="py-8 text-center text-slate-500 text-xs">Table is empty. No data inside inside query row limit.</td></tr>`;
+                updatePaginationControls();
+                return;
+            }
+
+            // Apply global local search query matching
+            const searchQuery = document.getElementById('table-search').value.toLowerCase().trim();
+            if (searchQuery) {
+                filteredTableData = tableData.filter(row => {
+                    return Object.values(row).some(val => 
+                        String(val).toLowerCase().includes(searchQuery)
+                    );
+                });
+            } else {
+                filteredTableData = [...tableData];
+            }
+
+            // Insert Table Header Fields
+            const columns = Object.keys(tableData[0]);
+            columns.forEach(col => {
+                const th = document.createElement('th');
+                th.className = "py-3.5 px-4 font-bold border-b border-slate-800";
+                th.innerText = col;
+                tableHeaders.appendChild(th);
+            });
+
+            // Perform Page slicing
+            const startIdx = (activePage - 1) * recordsPerPage;
+            const endIdx = Math.min(startIdx + recordsPerPage, filteredTableData.length);
+            const pageSlice = filteredTableData.slice(startIdx, endIdx);
+
+            if (pageSlice.length === 0) {
+                tableBody.innerHTML = `<tr><td colspan="100%" class="py-8 text-center text-slate-500 text-xs">No records matched your search query.</td></tr>`;
+            } else {
+                pageSlice.forEach(row => {
+                    const tr = document.createElement('tr');
+                    tr.className = "hover:bg-slate-900/40 transition-colors";
+                    
+                    columns.forEach(col => {
+                        const td = document.createElement('td');
+                        td.className = "py-3 px-4 text-slate-300 max-w-xs truncate font-medium";
+                        
+                        // Treat NULLs with special styling labels
+                        const value = row[col];
+                        if (value === null) {
+                            td.innerHTML = `<span class="text-slate-600 font-mono italic text-[11px]">NULL</span>`;
+                        } else {
+                            td.innerText = value;
+                        }
+                        tr.appendChild(td);
+                    });
+                    tableBody.appendChild(tr);
+                });
+            }
+
+            updatePaginationControls(startIdx + 1, endIdx);
+        }
+
+        // Live Event Listeners for local instant table search filter
+        document.getElementById('table-search').addEventListener('input', () => {
+            activePage = 1;
+            renderExplorerTable();
+        });
+
+        // Set Pagination State variables
+        function resetPagination() {
+            recordsPerPage = parseInt(document.getElementById('paginated-rows-limit').value);
+            activePage = 1;
+            renderExplorerTable();
+        }
+
+        // Handle page navigating clicks
+        function navigatePage(direction) {
+            const maxPage = Math.ceil(filteredTableData.length / recordsPerPage);
+            const targetPage = activePage + direction;
+            if (targetPage >= 1 && targetPage <= maxPage) {
+                activePage = targetPage;
+                renderExplorerTable();
+            }
+        }
+
+        // UI Updates for Next/Prev state indicators
+        function updatePaginationControls(start = 0, end = 0) {
+            const total = filteredTableData.length;
+            const displayStart = total === 0 ? 0 : start;
+            const displayEnd = end;
+
+            document.getElementById('paginated-start-row').innerText = displayStart;
+            document.getElementById('paginated-end-row').innerText = displayEnd;
+            document.getElementById('paginated-total-rows').innerText = total;
+            document.getElementById('current-page-num').innerText = activePage;
+
+            const maxPage = Math.ceil(total / recordsPerPage);
+            document.getElementById('prev-page-btn').disabled = activePage <= 1;
+            document.getElementById('next-page-btn').disabled = activePage >= maxPage || maxPage === 0;
+        }
+
+        // Execute Custom SQL Query Engine
+        function runCustomQuery() {
+            if (!db) {
+                showToast("No Database Active", "Please load a database or activate Demo mode first.", "warning");
+                return;
+            }
+            const query = document.getElementById('sql-query-editor').value.trim();
+            const placeholder = document.getElementById('query-result-placeholder');
+            const errorDisplay = document.getElementById('query-error-display');
+            const resultTable = document.getElementById('query-result-table');
+            const exportActions = document.getElementById('query-export-actions');
+
+            if (!query) {
+                showToast("Empty Workspace", "Please enter a valid SQL query.", "warning");
+                return;
+            }
+
+            // Hide previous tables/errors
+            errorDisplay.classList.add('hidden');
+            resultTable.classList.add('hidden');
+            exportActions.classList.add('hidden');
+            placeholder.classList.add('hidden');
+
+            try {
+                // Run SQLite Execution Array inside Memory context
+                const res = db.exec(query);
+                
+                if (res.length === 0) {
+                    // Successful action query with no rows returned (e.g., CREATE, UPDATE, DELETE)
+                    placeholder.classList.remove('hidden');
+                    placeholder.innerHTML = `
+                        <div class="text-emerald-400 text-3xl mb-3"><i class="fa-solid fa-circle-check"></i></div>
+                        <h4 class="text-sm font-bold text-slate-100">Execution Successful</h4>
+                        <p class="text-xs text-slate-400 mt-1">Command ran successfully. No row values were returned from database state changes.</p>
+                    `;
+                    
+                    // Refresh sidebar to update dynamic counts if changes occurred
+                    refreshSidebarTables();
+                    generateDashboardStats();
+                    return;
+                }
+
+                // Table matching output
+                const columns = res[0].columns;
+                const values = res[0].values;
+
+                // Cache globally for exporters
+                lastQueryColumns = columns;
+                lastQueryValues = values;
+
+                // Unveil Result Grid & Buttons
+                resultTable.classList.remove('hidden');
+                exportActions.classList.remove('hidden');
+
+                // Clear prior tables
+                const headerRow = document.getElementById('query-result-header');
+                const bodyContainer = document.getElementById('query-result-body');
+                headerRow.innerHTML = "<tr></tr>";
+                bodyContainer.innerHTML = "";
+
+                // Populate Headers
+                columns.forEach(col => {
+                    const th = document.createElement('th');
+                    th.className = "py-3 px-4 font-bold border-b border-slate-800 text-slate-400";
+                    th.innerText = col;
+                    headerRow.querySelector('tr').appendChild(th);
+                });
+
+                // Populate Rows
+                values.forEach(rowArr => {
+                    const tr = document.createElement('tr');
+                    tr.className = "hover:bg-slate-900/40 border-b border-slate-800/20";
+                    
+                    rowArr.forEach(val => {
+                        const td = document.createElement('td');
+                        td.className = "py-2.5 px-4 text-slate-300 font-mono text-xs";
+                        
+                        if (val === null) {
+                            td.innerHTML = `<span class="text-slate-600 italic">NULL</span>`;
+                        } else {
+                            td.innerText = val;
+                        }
+                        tr.appendChild(td);
+                    });
+                    bodyContainer.appendChild(tr);
+                });
+
+            } catch (err) {
+                console.error(err);
+                errorDisplay.classList.remove('hidden');
+                errorDisplay.innerText = err.message || "An unknown SQLite compilation error occurred.";
+            }
+        }
+
+        // Preload SQL templates inside editor workspace
+        function loadQueryTemplate(type) {
+            switchTab('query');
+            const editor = document.getElementById('sql-query-editor');
+            
+            let query = "";
+            switch(type) {
+                case 'lowStock':
+                    query = `SELECT name, sku, quantity, reorder_level \nFROM products \nWHERE quantity <= reorder_level \nORDER BY quantity ASC;`;
+                    break;
+                case 'valuation':
+                    query = `SELECT c.name AS category_name, COUNT(p.id) AS unique_products, SUM(p.quantity) AS total_stock, \n       SUM(p.quantity * p.unit_price) AS inventory_valuation\nFROM categories c\nLEFT JOIN products p ON p.category_id = c.id\nGROUP BY c.id\nORDER BY inventory_valuation DESC;`;
+                    break;
+                case 'recentTransactions':
+                    query = `SELECT t.transaction_date, p.name AS product_name, p.sku, t.type, t.quantity, t.notes\nFROM inventory_transactions t\nJOIN products p ON t.product_id = p.id\nORDER BY t.transaction_date DESC\nLIMIT 15;`;
+                    break;
+                case 'suppliers':
+                    query = `SELECT s.name AS supplier_name, s.contact_name, s.email, COUNT(p.id) AS product_count\nFROM suppliers s\nLEFT JOIN products p ON p.supplier_id = s.id\nGROUP BY s.id;`;
+                    break;
+            }
+            editor.value = query;
+            runCustomQuery();
+        }
+
+        // Clean query statement window text
+        function clearQueryEditor() {
+            document.getElementById('sql-query-editor').value = "";
+            document.getElementById('query-result-placeholder').classList.remove('hidden');
+            document.getElementById('query-error-display').classList.add('hidden');
+            document.getElementById('query-result-table').classList.add('hidden');
+            document.getElementById('query-export-actions').classList.add('hidden');
+        }
+
+        // Dynamic Analytical Calculations & Dashboard Rendering
+        function generateDashboardStats() {
+            if (!db) return;
+
+            let tables = [];
+            try {
+                tables = getTableList();
+            } catch (err) {
+                console.error("Failed to read database catalog index.", err);
+                return;
+            }
+
+            // Setup default stat fallbacks
+            let totalProducts = 0;
+            let totalQty = 0;
+            let totalValuation = 0.0;
+            let lowStockCount = 0;
+
+            // Compute Stats safely from DB
+            try {
+                if (tables.includes('products')) {
+                    // Total Products
+                    const countRes = db.exec("SELECT count(*) FROM products");
+                    if (countRes.length > 0) totalProducts = countRes[0].values[0][0];
+
+                    // Total Qty
+                    const qtyRes = db.exec("SELECT sum(quantity) FROM products");
+                    if (qtyRes.length > 0 && qtyRes[0].values[0][0] !== null) {
+                        totalQty = qtyRes[0].values[0][0];
+                    }
+
+                    // Total Valuation
+                    const valRes = db.exec("SELECT sum(quantity * unit_price) FROM products");
+                    if (valRes.length > 0 && valRes[0].values[0][0] !== null) {
+                        totalValuation = valRes[0].values[0][0];
+                    }
+
+                    // Low Stock Alert Count
+                    const alertRes = db.exec("SELECT count(*) FROM products WHERE quantity <= reorder_level");
+                    if (alertRes.length > 0) lowStockCount = alertRes[0].values[0][0];
+                }
+            } catch (err) {
+                console.warn("Analytics computations failed. This is expected if using alternative schemas.", err);
+            }
+
+            // Write outputs
+            document.getElementById('stat-total-products').innerText = formatNumber(totalProducts);
+            document.getElementById('stat-total-qty').innerText = formatNumber(totalQty);
+            document.getElementById('stat-total-value').innerText = formatCurrency(totalValuation);
+            document.getElementById('stat-low-stock').innerText = formatNumber(lowStockCount);
+
+            // Populate dashboard ledger and category graphics
+            renderDashboardLedger(tables);
+            renderCategoryProgressBars(tables);
+            renderLowStockAlerts(tables);
+        }
+
+        // Populate recent changes logs on Dashboard view
+        function renderDashboardLedger(tables) {
+            const body = document.getElementById('dashboard-transactions-body');
+            body.innerHTML = "";
+
+            if (!tables.includes('inventory_transactions') || !tables.includes('products')) {
+                body.innerHTML = `<tr><td colspan="5" class="py-12 text-center text-slate-500 text-xs italic"><i class="fa-solid fa-circle-info block mb-2 text-slate-600"></i>'inventory_transactions' table not detected.<br/>Upload standard schema for ledger logs.</td></tr>`;
+                return;
+            }
+
+            try {
+                const res = db.exec(`
+                    SELECT t.transaction_date, p.sku, p.name, t.type, t.quantity, t.notes
+                    FROM inventory_transactions t
+                    JOIN products p ON t.product_id = p.id
+                    ORDER BY t.transaction_date DESC
+                    LIMIT 5
+                `);
+
+                if (res.length > 0 && res[0].values.length > 0) {
+                    res[0].values.forEach(row => {
+                        const date = row[0];
+                        const sku = row[1];
+                        const name = row[2];
+                        const type = row[3];
+                        const qty = row[4];
+                        const notes = row[5] || 'None';
+
+                        const tr = document.createElement('tr');
+                        tr.className = "border-b border-slate-800/10 hover:bg-slate-900/10";
+                        tr.innerHTML = `
+                            <td class="py-3 px-2 text-xs font-mono text-slate-400">${date}</td>
+                            <td class="py-3 px-2 text-xs">
+                                <span class="font-bold text-slate-200 block">${sku}</span>
+                                <span class="text-[10px] text-slate-500 block truncate max-w-[120px]">${name}</span>
+                            </td>
+                            <td class="py-3 px-2 text-xs">
+                                <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                    type === 'IN' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 
+                                    type === 'OUT' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 
+                                    'bg-violet-500/10 text-violet-400 border border-violet-500/20'
+                                }">${type}</span>
+                            </td>
+                            <td class="py-3 px-2 text-xs text-right font-bold ${type === 'OUT' ? 'text-rose-400' : 'text-emerald-400'}">${type === 'OUT' ? '-' : '+'}${qty}</td>
+                            <td class="py-3 px-2 text-xs text-slate-400 truncate max-w-[150px]" title="${notes}">${notes}</td>
+                        `;
+                        body.appendChild(tr);
+                    });
+                } else {
+                    body.innerHTML = `<tr><td colspan="5" class="py-12 text-center text-slate-500 text-xs italic">No transaction entries matched. Ledger empty.</td></tr>`;
+                }
+            } catch (err) {
+                console.error("Dashboard ledger fetch issue", err);
+            }
+        }
+
+        // Render dynamic category bars
+        function renderCategoryProgressBars(tables) {
+            const container = document.getElementById('category-distribution-container');
+            container.innerHTML = "";
+
+            if (!tables.includes('categories') || !tables.includes('products')) {
+                container.innerHTML = `<div class="text-center py-12 text-slate-500 text-xs">Categories & products schema mismatch.</div>`;
+                return;
+            }
+
+            try {
+                const res = db.exec(`
+                    SELECT c.name, COALESCE(SUM(p.quantity * p.unit_price), 0) AS valuation
+                    FROM categories c
+                    LEFT JOIN products p ON p.category_id = c.id
+                    GROUP BY c.id
+                    ORDER BY valuation DESC
+                    LIMIT 4
+                `);
+
+                if (res.length > 0 && res[0].values.length > 0) {
+                    const data = res[0].values;
+                    const maxValuation = Math.max(...data.map(r => r[1]), 1); // Avoid division by zero
+
+                    data.forEach(row => {
+                        const name = row[0];
+                        const valuation = row[1];
+                        const percentage = (valuation / maxValuation) * 100;
+
+                        const bar = document.createElement('div');
+                        bar.className = "space-y-1.5";
+                        bar.innerHTML = `
+                            <div class="flex justify-between items-center text-xs">
+                                <span class="font-semibold text-slate-300">${name}</span>
+                                <span class="font-mono text-slate-400 font-bold">${formatCurrency(valuation)}</span>
+                            </div>
+                            <div class="w-full bg-slate-900 rounded-full h-2 overflow-hidden border border-slate-800">
+                                <div class="bg-brand-500 h-full rounded-full transition-all duration-500" style="width: ${percentage}%"></div>
+                            </div>
+                        `;
+                        container.appendChild(bar);
+                    });
+                } else {
+                    container.innerHTML = `<div class="text-center py-12 text-slate-500 text-xs">Category tables have no record entries.</div>`;
+                }
+            } catch (err) {
+                console.error("Category distribution calculation error", err);
+            }
+        }
+
+        // Render Low Stock items list in critical dashboard space
+        function renderLowStockAlerts(tables) {
+            const body = document.getElementById('dashboard-low-stock-body');
+            body.innerHTML = "";
+
+            if (!tables.includes('products')) {
+                body.innerHTML = `<tr><td colspan="5" class="py-12 text-center text-slate-500 text-xs italic">Missing 'products' table metadata to compute low stock metrics.</td></tr>`;
+                return;
+            }
+
+            try {
+                const res = db.exec(`
+                    SELECT name, sku, quantity, reorder_level
+                    FROM products
+                    WHERE quantity <= reorder_level
+                    ORDER BY quantity ASC
+                    LIMIT 5
+                `);
+
+                if (res.length > 0 && res[0].values.length > 0) {
+                    res[0].values.forEach(row => {
+                        const name = row[0];
+                        const sku = row[1];
+                        const qty = row[2];
+                        const threshold = row[3];
+
+                        const tr = document.createElement('tr');
+                        tr.className = "border-b border-slate-800/10 hover:bg-slate-900/10";
+                        tr.innerHTML = `
+                            <td class="py-3 px-2 text-xs font-semibold text-slate-100">${name}</td>
+                            <td class="py-3 px-2 text-xs font-mono text-slate-400">${sku}</td>
+                            <td class="py-3 px-2 text-xs font-bold text-rose-400">${qty} units</td>
+                            <td class="py-3 px-2 text-xs text-slate-400">${threshold} units</td>
+                            <td class="py-3 px-2 text-xs">
+                                <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30">CRITICAL</span>
+                            </td>
+                        `;
+                        body.appendChild(tr);
+                    });
+                } else {
+                    body.innerHTML = `<tr><td colspan="5" class="py-8 text-center text-emerald-400 text-xs font-bold flex items-center justify-center gap-1.5">
+                        <i class="fa-solid fa-circle-check"></i> Great Job! All stock levels are safely above thresholds.
+                    </td></tr>`;
+                }
+            } catch (err) {
+                console.error("Failed to fetch low stock list", err);
+            }
+        }
+
+        // CSV Downloader Utility
+        function exportCurrentTable(format) {
+            if (tableData.length === 0) return;
+            
+            let dataString = "";
+            let fileExt = "";
+            let mimeType = "";
+
+            if (format === 'csv') {
+                const columns = Object.keys(tableData[0]);
+                const csvRows = [columns.join(',')];
+                
+                filteredTableData.forEach(row => {
+                    const values = columns.map(col => {
+                        const escaped = ('' + row[col]).replace(/"/g, '""');
+                        return `"${escaped}"`;
+                    });
+                    csvRows.push(values.join(','));
+                });
+                dataString = csvRows.join('\n');
+                fileExt = '.csv';
+                mimeType = 'text/csv;charset=utf-8;';
+            } else if (format === 'json') {
+                dataString = JSON.stringify(filteredTableData, null, 2);
+                fileExt = '.json';
+                mimeType = 'application/json;charset=utf-8;';
+            }
+
+            downloadBlob(dataString, `${activeTable}_export${fileExt}`, mimeType);
+        }
+
+        // Export Query Results from workspace caching
+        function exportQueryResults(format) {
+            if (lastQueryColumns.length === 0) return;
+
+            let dataString = "";
+            let fileExt = "";
+            let mimeType = "";
+
+            if (format === 'csv') {
+                const csvRows = [lastQueryColumns.join(',')];
+                lastQueryValues.forEach(rowArr => {
+                    const values = rowArr.map(val => {
+                        const escaped = ('' + val).replace(/"/g, '""');
+                        return `"${escaped}"`;
+                    });
+                    csvRows.push(values.join(','));
+                });
+                dataString = csvRows.join('\n');
+                fileExt = '.csv';
+                mimeType = 'text/csv;charset=utf-8;';
+            } else if (format === 'json') {
+                const mappedObjects = lastQueryValues.map(rowArr => {
+                    const obj = {};
+                    lastQueryColumns.forEach((col, idx) => {
+                        obj[col] = rowArr[idx];
+                    });
+                    return obj;
+                });
+                dataString = JSON.stringify(mappedObjects, null, 2);
+                fileExt = '.json';
+                mimeType = 'application/json;charset=utf-8;';
+            }
+
+            downloadBlob(dataString, `query_results${fileExt}`, mimeType);
+        }
+
+        // Helper trigger browser physical download event
+        function downloadBlob(content, filename, contentType) {
+            const blob = new Blob([content], { type: contentType });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.setAttribute("href", url);
+            link.setAttribute("download", filename);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        // Tab Switching State Machine
+        function switchTab(tabId) {
+            currentTab = tabId;
+
+            // Manage button active states
+            const tabs = ['dashboard', 'explorer', 'query'];
+            tabs.forEach(t => {
+                const btn = document.getElementById(`tab-btn-${t}`);
+                if (t === tabId) {
+                    btn.classList.add('border-brand-500', 'text-brand-400');
+                    btn.classList.remove('border-transparent', 'text-slate-400');
+                    document.getElementById(`tab-content-${t}`).classList.remove('hidden');
+                } else {
+                    btn.classList.remove('border-brand-500', 'text-brand-400');
+                    btn.classList.add('border-transparent', 'text-slate-400');
+                    document.getElementById(`tab-content-${t}`).classList.add('hidden');
+                }
+            });
+        }
+
+        // General-purpose formatting utility helper
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        }
+
+        function formatCurrency(number) {
+            return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(number);
+        }
+
+        function formatNumber(number) {
+            return new Intl.NumberFormat('en-US').format(number);
+        }
+
+        // Custom application notification system
+        function showToast(title, desc, type = "success") {
+            const toast = document.getElementById('status-toast');
+            const icon = document.getElementById('toast-icon');
+            const titleEl = document.getElementById('toast-title');
+            const descEl = document.getElementById('toast-desc');
+
+            toast.classList.remove('hidden');
+            
+            // Apply theme variations
+            if (type === "success") {
+                toast.className = "fixed bottom-6 right-6 z-50 max-w-sm p-4 rounded-xl border bg-slate-950 border-emerald-500/20 text-emerald-400 shadow-2xl transition-all duration-300 flex items-start gap-3";
+                icon.innerHTML = `<i class="fa-solid fa-circle-check"></i>`;
+            } else if (type === "error") {
+                toast.className = "fixed bottom-6 right-6 z-50 max-w-sm p-4 rounded-xl border bg-slate-950 border-rose-500/20 text-rose-400 shadow-2xl transition-all duration-300 flex items-start gap-3";
+                icon.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i>`;
+            } else {
+                toast.className = "fixed bottom-6 right-6 z-50 max-w-sm p-4 rounded-xl border bg-slate-950 border-amber-500/20 text-amber-400 shadow-2xl transition-all duration-300 flex items-start gap-3";
+                icon.innerHTML = `<i class="fa-solid fa-circle-exclamation"></i>`;
+            }
+
+            titleEl.innerText = title;
+            descEl.innerText = desc;
+
+            // Automatically dismiss after 5s
+            setTimeout(hideToast, 5000);
+        }
+
+        function hideToast() {
+            document.getElementById('status-toast').classList.add('hidden');
+        }
+    </script>
+</body>
+</html>

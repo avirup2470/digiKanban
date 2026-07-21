@@ -131,7 +131,7 @@ def process_event(event_json, source_logging_location):
         
         if not part_exists:
             cursor.execute('''
-                INSERT INTO Part (id, name, total_quan, location)
+                INSERT INTO Part (id, name, total_quantity, location)
                 VALUES (?, ?, 0, ?)
             ''', (part_id, f"Part-{part_id}", arrival_location))
 
@@ -182,7 +182,7 @@ def process_event(event_json, source_logging_location):
         # --- FIX: STEP 5: Apply inventory changes to the Part record
         cursor.execute('''
             UPDATE Part 
-            SET total_quan = total_quan + ?, location = ?
+            SET total_quantity = total_quantity + ?, location = ?
             WHERE id = ?
         ''', (signed_qt, arrival_location, part_id))
 
