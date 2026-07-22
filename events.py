@@ -164,7 +164,7 @@ def process_event(event_json, source_logging_location):
         # Determine Event Type
         # -------------------------------------------------------------
         is_production = (
-            source_logging_location == arrival_location
+            source_logging_location.strip().lower() == arrival_location.strip().lower()
         )
         if(is_production):
             print("prod")
