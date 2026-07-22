@@ -221,7 +221,22 @@ def process_event():
     data = request.json or {}
     source_logging_location = data.get('source_location')
     event_json = data.get('event_json')
-    events.process_event(event_json, source_logging_location)
+    success, message =events.process_event(event_json, source_logging_location)
+    if success:
+        print("✅", message)
+    else:
+        print("❌", message)
+    if success:
+        return jsonify({
+            "success": True,
+            "message": message
+        }), 200
+
+    return jsonify({
+        "success": False,
+        "message": message
+    }), 400
+
 
 
     

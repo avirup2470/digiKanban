@@ -95,128 +95,302 @@ def fifo_update(cursor, current_card_id, part_id, arrival_location):
             fifo_count = fifo_count + ?
     ''', (arrival_location, part_id, month_year_str, fifo_inc, fifo_inc))
 
-
 def process_event(event_json, source_logging_location):
     """
-    Main logic to process a single event upload locally via SQLite.
-    Supports single JSON objects and array envelopes.
+    Processes a single inventory event.
+
+    Returns:
+        (True, success_message)  -> on success
+        (False, error_message)   -> on failure
     """
-    # Double-check DB structures
     ensure_schema_compatibility()
-    
+
     conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute("PRAGMA foreign_keys = ON;")
-    
+
     try:
+        # -------------------------------------------------------------
+        # Parse JSON
+        # -------------------------------------------------------------
         raw_data = json.loads(event_json)
-        # Handle array envelopes
         event = raw_data[0] if isinstance(raw_data, list) else raw_data
 
-        part_id = event.get('Parts document ID')
-        card_id = event.get('Id')
-        arrival_location = event.get('ArrivalLocation')
-        
+        part_id = event.get("Parts document ID")
+        card_id = event.get("Id")
+        arrival_location = event.get("ArrivalLocation")
+
         try:
-            base_quantity = float(event.get('Qt', 0))
+            base_quantity = float(event.get("Qt", 0))
         except (ValueError, TypeError):
-            base_quantity = 0.0
+            base_quantity = 0
 
-        if not part_id or not card_id or not arrival_location or base_quantity <= 0:
-            raise ValueError("Invalid Event Data fields. Ensure 'Parts document ID', 'Id', 'ArrivalLocation', and 'Qt' are correct.")
+        if not part_id:
+            raise ValueError("Missing 'Parts document ID'.")
 
-        # --- FIX: STEP 1: Ensure the Part exists first so it satisfies any relational keys
-        cursor.execute("SELECT id FROM Part WHERE id = ?", (part_id,))
+        if not card_id:
+            raise ValueError("Missing 'Id' (Card ID).")
+
+        if not arrival_location:
+            raise ValueError("Missing 'ArrivalLocation'.")
+
+        if base_quantity <= 0:
+            raise ValueError("Quantity (Qt) must be greater than zero.")
+
+        # -------------------------------------------------------------
+        # Ensure Part Exists
+        # -------------------------------------------------------------
+        cursor.execute(
+            "SELECT id FROM Part WHERE id = ?",
+            (part_id,)
+        )
+
         part_exists = cursor.fetchone() is not None
-        
-        if not part_exists:
-            cursor.execute('''
-                INSERT INTO Part (id, name, total_quantity, location)
-                VALUES (?, ?, 0, ?)
-            ''', (part_id, f"Part-{part_id}", arrival_location))
 
-        is_production = (source_logging_location == arrival_location)
-        
-        # --- FIX: STEP 2: Handle Card presence check
-        cursor.execute("SELECT activation FROM Card WHERE id = ?", (card_id,))
+        if not part_exists:
+            cursor.execute("""
+                INSERT INTO Part
+                (id, name, total_quantity, location)
+                VALUES (?, ?, ?, ?)
+            """, (
+                part_id,
+                f"Part-{part_id}",
+                0,
+                arrival_location
+            ))
+
+        # -------------------------------------------------------------
+        # Determine Event Type
+        # -------------------------------------------------------------
+        is_production = (
+            source_logging_location == arrival_location
+        )
+
+        # -------------------------------------------------------------
+        # Check Card Status
+        # -------------------------------------------------------------
+        cursor.execute("""
+            SELECT activation
+            FROM Card
+            WHERE id = ?
+        """, (card_id,))
+
         card_row = cursor.fetchone()
+
         card_exists = card_row is not None
-        card_activation = card_row[0] if card_exists else None
+        card_activation = card_row["activation"] if card_exists else None
 
         signed_qt = base_quantity
+
         if is_production:
-            if card_exists and card_activation == 'true':
-                raise ValueError(f"Card ID {card_id} is already active.")
+
+            if card_exists and card_activation == "true":
+                raise ValueError(
+                    f"Card '{card_id}' is already ACTIVE."
+                )
+
             signed_qt = base_quantity
+
         else:
-            if card_exists and card_activation == 'false':
-                raise ValueError(f"Card ID {card_id} is already inactive.")
-            
-            # Execute FIFO rule checking (Part and Card records now guaranteed to exist in the database)
-            fifo_update(cursor, card_id, part_id, arrival_location)
+
+            if card_exists and card_activation == "false":
+                raise ValueError(
+                    f"Card '{card_id}' is already INACTIVE."
+                )
+
+            fifo_update(
+                cursor,
+                card_id,
+                part_id,
+                arrival_location
+            )
+
             signed_qt = -base_quantity
 
-        # --- FIX: STEP 3: Create or update Card status BEFORE inserting into Event (child table)
-        activation_state = 'true' if is_production else 'false'
-        red_state = 0
+        # -------------------------------------------------------------
+        # Update / Create Card
+        # -------------------------------------------------------------
+        activation_state = "true" if is_production else "false"
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         if card_exists:
-            cursor.execute('''
-                UPDATE Card 
-                SET activation = ?, part_id = ?, last_activated = ?, red = CASE WHEN ? = 'false' THEN red ELSE 0 END
-                WHERE id = ?
-            ''', (activation_state, part_id, now_str, activation_state, card_id))
+
+            cursor.execute("""
+                UPDATE Card
+                SET
+                    activation=?,
+                    part_id=?,
+                    last_activated=?,
+                    red=CASE
+                        WHEN ?='false'
+                        THEN red
+                        ELSE 0
+                    END
+                WHERE id=?
+            """, (
+                activation_state,
+                part_id,
+                now_str,
+                activation_state,
+                card_id
+            ))
+
         else:
-            cursor.execute('''
-                INSERT INTO Card (id, activation, part_id, last_activated, red, quantity, location)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (card_id, activation_state, part_id, now_str, red_state, base_quantity, arrival_location))
 
-        # --- FIX: STEP 4: Safe to write log into Event table (Parent records in Part/Card are fully resolved)
-        cursor.execute('''
-            INSERT INTO Event (card_id, part_id, location, quantity, timestamp)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (card_id, part_id, arrival_location, signed_qt, now_str))
+            cursor.execute("""
+                INSERT INTO Card
+                (
+                    id,
+                    activation,
+                    part_id,
+                    last_activated,
+                    red,
+                    quantity,
+                    location
+                )
+                VALUES
+                (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                card_id,
+                activation_state,
+                part_id,
+                now_str,
+                0,
+                base_quantity,
+                arrival_location
+            ))
 
-        # --- FIX: STEP 5: Apply inventory changes to the Part record
-        cursor.execute('''
-            UPDATE Part 
-            SET total_quantity = total_quantity + ?, location = ?
+        # -------------------------------------------------------------
+        # Insert Event
+        # -------------------------------------------------------------
+        cursor.execute("""
+            INSERT INTO Event
+            (
+                card_id,
+                part_id,
+                location,
+                quantity,
+                timestamp
+            )
+            VALUES
+            (?, ?, ?, ?, ?)
+        """, (
+            card_id,
+            part_id,
+            arrival_location,
+            signed_qt,
+            now_str
+        ))
+
+        # -------------------------------------------------------------
+        # Update Part Inventory
+        # -------------------------------------------------------------
+        cursor.execute("""
+            UPDATE Part
+            SET
+                total_quantity = total_quantity + ?,
+                location = ?
             WHERE id = ?
-        ''', (signed_qt, arrival_location, part_id))
+        """, (
+            signed_qt,
+            arrival_location,
+            part_id
+        ))
 
-        # 6. Check & Progress Tasks
-        cursor.execute('''
-            SELECT id, target, current FROM Task 
-            WHERE part_id = ? AND status != 'Completed'
-            ORDER BY time ASC LIMIT 1
-        ''', (part_id,))
+        # -------------------------------------------------------------
+        # Update Active Task
+        # -------------------------------------------------------------
+        cursor.execute("""
+            SELECT
+                id,
+                target,
+                current
+            FROM Task
+            WHERE
+                part_id = ?
+                AND status != 'Completed'
+            ORDER BY time ASC
+            LIMIT 1
+        """, (part_id,))
+
         active_task = cursor.fetchone()
-        
-        if active_task:
-            task_id, target, current_qty = active_task
-            # Only increment progress if units are being generated (production)
-            if signed_qt > 0:
-                new_current = current_qty + signed_qt
-                new_status = 'Completed' if new_current >= target else 'In Progress'
-                cursor.execute('''
-                    UPDATE Task 
-                    SET current = ?, status = ? 
-                    WHERE id = ?
-                ''', (new_current, new_status, task_id))
-                print(f"[#] Task #{task_id} updated: {new_current}/{target} units.")
 
+        if active_task and signed_qt > 0:
+
+            task_id = active_task["id"]
+            target = active_task["target"]
+            current_qty = active_task["current"]
+
+            new_current = current_qty + signed_qt
+            new_status = (
+                "Completed"
+                if new_current >= target
+                else "In Progress"
+            )
+
+            cursor.execute("""
+                UPDATE Task
+                SET
+                    current=?,
+                    status=?
+                WHERE id=?
+            """, (
+                new_current,
+                new_status,
+                task_id
+            ))
+
+        # -------------------------------------------------------------
+        # Commit
+        # -------------------------------------------------------------
         conn.commit()
-        print(f"SUCCESS: Upload complete local transaction for Card {card_id}")
-        return True
 
-    except Exception as error:
-        print(f"ERROR: {error}")
+        success_message = (
+            f"Card '{card_id}' processed successfully."
+        )
+
+        print(success_message)
+
+        return True, success_message
+
+    except sqlite3.IntegrityError as e:
+
         conn.rollback()
-        return False
+
+        error_message = (
+            f"Database integrity error: {str(e)}"
+        )
+
+        print(error_message)
+
+        return False, error_message
+
+    except ValueError as e:
+
+        conn.rollback()
+
+        error_message = str(e)
+
+        print(error_message)
+
+        return False, error_message
+
+    except Exception as e:
+
+        conn.rollback()
+
+        error_message = (
+            f"Unexpected error: {str(e)}"
+        )
+
+        print(error_message)
+
+        return False, error_message
+
     finally:
         conn.close()
+
 
 if __name__ == "__main__":
     args = sys.argv[1:]
