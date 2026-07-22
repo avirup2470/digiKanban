@@ -225,7 +225,7 @@ def run_http_upload(data_str):
     current_effect = 'uploading'
     
     # Pack payload for Flask server processing endpoint
-    url = f"http://{HOST_PI_IP}:{HOST_PI_PORT}/api/events/upload"
+    url = f"http://{HOST_PI_IP}:{HOST_PI_PORT}/api/events/run"
     payload = {
         "source_location": LOCATION,
         "event_json": data_str
