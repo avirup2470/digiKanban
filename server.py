@@ -3,7 +3,7 @@ import os
 import json
 from datetime import datetime
 from flask import Flask, request, jsonify, send_from_directory
-
+import events
 app = Flask(__name__)
 DB_PATH = 'inventory.db'
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -216,7 +216,15 @@ def api_get_events_logs():
     conn.close()
     return jsonify(logs)
 
+@app.route('/api/events/run', methods=['POST'])
+def process_event():
+    data = request.json or {}
+    source_logging_location = data.get('source_location')
+    event_json = data.get('event_json')
+    events.process_event(event_json, source_logging_location)
 
+
+    
 @app.route('/api/events/upload', methods=['POST'])
 def api_process_event():
     """
