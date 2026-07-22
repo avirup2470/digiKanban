@@ -109,7 +109,7 @@ def process_event(event_json, source_logging_location):
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute("PRAGMA foreign_keys = ON;")
-
+    print(source_logging_location)
     try:
         # -------------------------------------------------------------
         # Parse JSON
