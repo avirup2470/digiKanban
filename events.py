@@ -168,6 +168,9 @@ def process_event(event_json, source_logging_location):
         )
         if(is_production):
             print("prod")
+        else:
+            print(source_logging_location)
+            print(arrival_location)
         
 
         # -------------------------------------------------------------
