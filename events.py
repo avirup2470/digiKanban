@@ -166,6 +166,9 @@ def process_event(event_json, source_logging_location):
         is_production = (
             source_logging_location == arrival_location
         )
+        if(is_production):
+            print("prod")
+        
 
         # -------------------------------------------------------------
         # Check Card Status
