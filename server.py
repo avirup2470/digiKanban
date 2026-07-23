@@ -181,7 +181,7 @@ def api_get_parts():
     """Returns detailed information about all registered parts."""
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, name, description, total_quan, location, fifo FROM Part ORDER BY id ASC")
+    cursor.execute("SELECT id, name, description, total_quantity, location, fifo FROM Part ORDER BY id ASC")
     parts = [dict(row) for row in cursor.fetchall()]
     conn.close()
     return jsonify(parts)
@@ -237,108 +237,6 @@ def process_event():
         "message": message
     }), 400
 
-
-
-    
-@app.route('/api/events/upload', methods=['POST'])
-def api_process_event():
-    """
-    Unified JSON Event processor.
-    Accepts incoming payload scans from workstation scanners (remoteEvent.py), 
-    applies business logic, checks FIFO rules, and commits transactions to SQLite.
-    """
-    data = request.json or {}
-    source_logging_location = data.get('source_location')
-    event_json = data.get('event_json')
-
-    if not source_logging_location or not event_json:
-        return jsonify({"error": "Missing 'source_location' or 'event_json' parameters"}), 400
-
-    try:
-        raw_data = json.loads(event_json)
-        event = raw_data[0] if isinstance(raw_data, list) else raw_data
-
-        part_id = event.get('Parts document ID')
-        card_id = event.get('Id')
-        arrival_location = event.get('ArrivalLocation')
-        
-        try:
-            base_quantity = float(event.get('Qt', 0))
-        except (ValueError, TypeError):
-            base_quantity = 0.0
-
-        if not part_id or not card_id or not arrival_location or base_quantity <= 0:
-            return jsonify({"error": "Invalid Event Data fields. Verify 'Parts document ID', 'Id', 'ArrivalLocation', and 'Qt'."}), 400
-
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        # Step 1: Handle Parent table dependencies. Create part if auto-discovered on scan.
-        cursor.execute("SELECT id FROM Part WHERE id = ?", (part_id,))
-        if not cursor.fetchone():
-            cursor.execute('''
-                INSERT INTO Part (id, name, total_quan, location)
-                VALUES (?, ?, 0, ?)
-            ''', (part_id, f"Part-{part_id}", arrival_location))
-
-        is_production = (source_logging_location == arrival_location)
-        
-        cursor.execute("SELECT activation FROM Card WHERE id = ?", (card_id,))
-        card_row = cursor.fetchone()
-        card_exists = card_row is not None
-        card_activation = card_row[0] if card_exists else None
-
-        signed_qt = base_quantity
-        if is_production:
-            if card_exists and card_activation == 'true':
-                conn.close()
-                return jsonify({"error": f"Card ID {card_id} is already active."}), 400
-            signed_qt = base_quantity
-        else:
-            if card_exists and card_activation == 'false':
-                conn.close()
-                return jsonify({"error": f"Card ID {card_id} is already inactive."}), 400
-            
-            # Execute physical FIFO audit calculations
-            calculate_fifo_audit(cursor, card_id, part_id, arrival_location)
-            signed_qt = -base_quantity
-
-        # Step 2: Establish current Card state parameters
-        activation_state = 'true' if is_production else 'false'
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        if card_exists:
-            # Re-entering production resets local Red Warnings
-            cursor.execute('''
-                UPDATE Card 
-                SET activation = ?, part_id = ?, last_activated = ?, red = CASE WHEN ? = 'false' THEN red ELSE 0 END, location = ?
-                WHERE id = ?
-            ''', (activation_state, part_id, now_str, activation_state, arrival_location, card_id))
-        else:
-            cursor.execute('''
-                INSERT INTO Card (id, activation, part_id, last_activated, red, quantity, location)
-                VALUES (?, ?, ?, ?, 0, ?, ?)
-            ''', (card_id, activation_state, part_id, now_str, base_quantity, arrival_location))
-
-        # Step 3: Insert Entry into Event Logs Ledger (Child table)
-        cursor.execute('''
-            INSERT INTO Event (card_id, part_id, location, quantity, source_location, timestamp)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (card_id, part_id, arrival_location, signed_qt, source_logging_location, now_str))
-
-        # Step 4: Perform final inventory transaction balance adjustments
-        cursor.execute('''
-            UPDATE Part 
-            SET total_quan = total_quan + ?, location = ?
-            WHERE id = ?
-        ''', (signed_qt, arrival_location, part_id))
-
-        conn.commit()
-        conn.close()
-        return jsonify({"message": f"SUCCESS: Event processed successfully for Card #{card_id}"}), 200
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     # Ensure database is configured with correct tables upon startup
