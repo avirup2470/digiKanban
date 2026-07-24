@@ -301,8 +301,8 @@
             messageBox.classList.add('hidden');
 
             try {
-                // SQL Query: SELECT id, name, description, total_quantity, location, fifo FROM Part WHERE location = ?;
-                const sqlQuery = `SELECT id, name, description, total_quantity, location, fifo FROM Part WHERE location = '${locationId.replace(/'/g, "''")}';`;
+                // SQL Query with ? placeholder for parameter binding
+                const sqlQuery = `SELECT id, name, description, total_quantity, location, fifo FROM Part WHERE location = ?;`;
                 const rows = await runSqlQuery(sqlQuery, [locationId]);
 
                 partsCache[locationId] = rows || [];
@@ -358,8 +358,8 @@
             submitBtn.innerHTML = '<i class="fa-solid fa-spinner animate-spin mr-2"></i> Registering Card via SQL...';
 
             try {
-                // SQL Query: INSERT INTO Card (location, part_id, quantity, trolly_no, trolly_type, activation) VALUES (?, ?, ?, ?, ?, 'false');
-                const sqlQuery = `INSERT INTO Card (location, part_id, quantity, trolly_no, trolly_type, activation) VALUES ('${locationId.replace(/'/g, "''")}', '${partId.replace(/'/g, "''")}', ${quantity}, '${trollyNo.replace(/'/g, "''")}', '${cardType}', 'false');`;
+                // SQL Query with ? placeholders for parameter binding
+                const sqlQuery = `INSERT INTO Card (location, part_id, quantity, trolly_no, trolly_type, activation) VALUES (?, ?, ?, ?, ?, 'false');`;
                 
                 const result = await runSqlQuery(sqlQuery, [locationId, partId, quantity, trollyNo, cardType]);
                 const newCardId = result.last_inserted_id || Math.floor(Math.random() * 1000) + 100;

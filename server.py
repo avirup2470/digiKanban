@@ -197,7 +197,7 @@ def api_execute_query():
     payload = request.json or {}
     query_str = payload.get('query')
     params = payload.get('params', [])
-
+    
     if not query_str or not isinstance(query_str, str):
         return jsonify({
             "success": False,
@@ -207,7 +207,8 @@ def api_execute_query():
 
     # Invoke events.py function to execute query
     success, message, data = events.execute_custom_query(query_str, params)
-
+    print(query_str)
+    print(message)
     status_code = 200 if success else 400
     return jsonify({
         "success": success,
