@@ -5,6 +5,16 @@ from datetime import datetime
 
 DB_PATH = 'inventory.db'
 
+def get_db_connection():
+    """
+    Establishes an SQLite connection with active foreign key tracking.
+    Enforces referential integrity for Part, Card, and Event tables.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON;")
+    return conn
+
 def ensure_schema_compatibility():
     """
     Ensures that the SQLite schema has the necessary columns and tables 
@@ -284,7 +294,7 @@ def process_event(event_json, source_logging_location):
         """, (
             card_id,
             part_id,
-            arrival_location,
+            source_logging_location,
             signed_qt,
             now_str
         ))
@@ -397,6 +407,72 @@ def process_event(event_json, source_logging_location):
     finally:
         conn.close()
 
+def execute_custom_query(query_str, params=None):
+    """
+    Executes a custom SQLite query passed from server.py against inventory.db.
+    
+    Parameters:
+        query_str (str): The SQL statement to execute.
+        params (tuple or list, optional): Parameter values for bound queries.
+        
+    Returns:
+        tuple: (success: bool, message: str, data: list|dict|None)
+    """
+    if not query_str or not isinstance(query_str, str):
+        return False, "Query must be a non-empty string.", None
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Clean query string for classification
+        clean_sql = query_str.strip().upper()
+        
+        # Default empty parameters if none provided
+        if params is None:
+            params = ()
+
+        cursor.execute(query_str, params)
+
+        # Handle read queries (SELECT, PRAGMA, EXPLAIN, WITH)
+        if clean_sql.startswith(('SELECT', 'PRAGMA', 'EXPLAIN', 'WITH')):
+            rows = cursor.fetchall()
+            # Convert sqlite3.Row objects into standard serializable dictionaries
+            results = [dict(row) for row in rows]
+            conn.close()
+            return True, f"Query executed successfully. Fetched {len(results)} row(s).", results
+
+        # Handle write/mutation queries (INSERT, UPDATE, DELETE, CREATE, DROP, ALTER)
+        else:
+            conn.commit()
+            affected = cursor.rowcount
+            last_id = cursor.lastrowid
+            
+            summary = {
+                "affected_rows": affected,
+                "last_inserted_id": last_id if last_id else None
+            }
+            conn.close()
+            return True, f"Database updated successfully. Affected {affected} row(s).", summary
+
+    except sqlite3.Error as err:
+        if conn:
+            try:
+                conn.rollback()
+                conn.close()
+            except Exception:
+                pass
+        return False, f"SQLite Error: {str(err)}", None
+        
+    except Exception as err:
+        if conn:
+            try:
+                conn.rollback()
+                conn.close()
+            except Exception:
+                pass
+        return False, f"Execution Error: {str(err)}", None
 
 if __name__ == "__main__":
     args = sys.argv[1:]

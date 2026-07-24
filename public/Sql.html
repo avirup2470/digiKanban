@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Inventory SQLite Query Console</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .font-code { font-family: 'Fira Code', monospace; }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col">
+
+    <header class="bg-slate-800 border-b border-slate-700 px-6 py-4 flex flex-wrap justify-between items-center shadow-lg">
+        <div class="flex items-center space-x-3">
+            <div class="p-2 bg-indigo-600 rounded-lg text-white">
+                <i class="fa-solid font-bold fa-database text-xl"></i>
+            </div>
+            <div>
+                <h1 class="text-xl font-bold text-white tracking-wide">Inventory SQLite Query Console</h1>
+                <p class="text-xs text-slate-400">Endpoint: <code class="text-indigo-400 bg-slate-950 px-1.5 py-0.5 rounded">POST /api/query</code></p>
+            </div>
+        </div>
+        <div class="flex items-center space-x-3 mt-2 sm:mt-0">
+            <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                <span class="w-2 h-2 mr-1.5 bg-emerald-400 rounded-full animate-pulse"></span> DB Connected
+            </span>
+            <button onclick="checkDatabaseStatus()" class="text-xs bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded text-slate-200 transition">
+                <i class="fa-solid fa-rotate-right mr-1"></i> Refresh Status
+            </button>
+        </div>
+    </header>
+
+    <main class="flex-1 p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-7xl mx-auto w-full">
+        
+        <!-- Left Column: Preset Queries & Schema Inspector -->
+        <div class="lg:col-span-4 space-y-6">
+            
+            <!-- Schema Quick Pickers -->
+            <div class="bg-slate-800 rounded-xl border border-slate-700 p-5 shadow-sm">
+                <h2 class="text-sm font-semibold text-slate-300 uppercase tracking-wider mb-3 flex items-center">
+                    <i class="fa-solid fa-table-list text-indigo-400 mr-2"></i> Quick Query Templates
+                </h2>
+                <div class="space-y-2">
+                    <button onclick="setQuery('SELECT * FROM Part ORDER BY id ASC;')" 
+                        class="w-full text-left px-3 py-2 text-xs bg-slate-900/60 hover:bg-indigo-950/50 hover:border-indigo-500/50 border border-slate-700/60 rounded-lg transition flex items-center justify-between group">
+                        <span class="text-indigo-300 font-medium">Get All Parts</span>
+                        <i class="fa-solid fa-chevron-right text-slate-500 group-hover:text-indigo-400 text-xs"></i>
+                    </button>
+                    <button onclick="setQuery('SELECT * FROM Card WHERE activation = \'true\';')" 
+                        class="w-full text-left px-3 py-2 text-xs bg-slate-900/60 hover:bg-indigo-950/50 hover:border-indigo-500/50 border border-slate-700/60 rounded-lg transition flex items-center justify-between group">
+                        <span class="text-indigo-300 font-medium">Get Active Cards</span>
+                        <i class="fa-solid fa-chevron-right text-slate-500 group-hover:text-indigo-400 text-xs"></i>
+                    </button>
+                    <button onclick="setQuery('INSERT INTO Part (name, description, total_quantity, location)\nVALUES (\'Resistor 10k\', \'10k Ohm Resistors\', 500, \'Rack-A1\');')" 
+                        class="w-full text-left px-3 py-2 text-xs bg-slate-900/60 hover:bg-indigo-950/50 hover:border-indigo-500/50 border border-slate-700/60 rounded-lg transition flex items-center justify-between group">
+                        <span class="text-emerald-300 font-medium">Insert New Part</span>
+                        <i class="fa-solid fa-plus text-slate-500 group-hover:text-emerald-400 text-xs"></i>
+                    </button>
+                    <button onclick="setQuery('UPDATE Part SET total_quantity = total_quantity + 50 WHERE id = 1;')" 
+                        class="w-full text-left px-3 py-2 text-xs bg-slate-900/60 hover:bg-indigo-950/50 hover:border-indigo-500/50 border border-slate-700/60 rounded-lg transition flex items-center justify-between group">
+                        <span class="text-amber-300 font-medium">Update Inventory Quantity</span>
+                        <i class="fa-solid fa-pen text-slate-500 group-hover:text-amber-400 text-xs"></i>
+                    </button>
+                    <button onclick="setQuery('SELECT * FROM Event ORDER BY timestamp DESC LIMIT 10;')" 
+                        class="w-full text-left px-3 py-2 text-xs bg-slate-900/60 hover:bg-indigo-950/50 hover:border-indigo-500/50 border border-slate-700/60 rounded-lg transition flex items-center justify-between group">
+                        <span class="text-indigo-300 font-medium">Recent Scan Audit Logs</span>
+                        <i class="fa-solid fa-chevron-right text-slate-500 group-hover:text-indigo-400 text-xs"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Database Tables Inspector -->
+            <div class="bg-slate-800 rounded-xl border border-slate-700 p-5 shadow-sm">
+                <h2 class="text-sm font-semibold text-slate-300 uppercase tracking-wider mb-3 flex items-center">
+                    <i class="fa-solid fa-cubes text-emerald-400 mr-2"></i> Database Tables
+                </h2>
+                <div class="space-y-1 text-xs">
+                    <div class="p-2 bg-slate-900/40 rounded flex justify-between items-center text-slate-300">
+                        <span><i class="fa-solid fa-table mr-2 text-slate-500"></i>Part</span>
+                        <span class="text-slate-500 font-code">Master Inventory</span>
+                    </div>
+                    <div class="p-2 bg-slate-900/40 rounded flex justify-between items-center text-slate-300">
+                        <span><i class="fa-solid fa-table mr-2 text-slate-500"></i>Card</span>
+                        <span class="text-slate-500 font-code">Kanban Cards</span>
+                    </div>
+                    <div class="p-2 bg-slate-900/40 rounded flex justify-between items-center text-slate-300">
+                        <span><i class="fa-solid fa-table mr-2 text-slate-500"></i>Event</span>
+                        <span class="text-slate-500 font-code">Audit Trail</span>
+                    </div>
+                    <div class="p-2 bg-slate-900/40 rounded flex justify-between items-center text-slate-300">
+                        <span><i class="fa-solid fa-table mr-2 text-slate-500"></i>FifoStats</span>
+                        <span class="text-slate-500 font-code">Monthly Metrics</span>
+                    </div>
+                    <div class="p-2 bg-slate-900/40 rounded flex justify-between items-center text-slate-300">
+                        <span><i class="fa-solid fa-table mr-2 text-slate-500"></i>Task</span>
+                        <span class="text-slate-500 font-code">Production Queue</span>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <div class="lg:col-span-8 space-y-6 flex flex-col">
+            
+            <!-- SQL Console Editor -->
+            <div class="bg-slate-800 rounded-xl border border-slate-700 p-5 shadow-sm flex flex-col">
+                <div class="flex justify-between items-center mb-2">
+                    <label for="sqlInput" class="text-sm font-semibold text-slate-300 flex items-center">
+                        <i class="fa-solid fa-terminal text-indigo-400 mr-2"></i> SQLite Query Editor
+                    </label>
+                    <button onclick="clearConsole()" class="text-xs text-slate-400 hover:text-white transition">
+                        <i class="fa-solid fa-eraser mr-1"></i> Clear
+                    </button>
+                </div>
+
+                <textarea id="sqlInput" rows="5" 
+                    class="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-emerald-400 font-code text-sm focus:outline-none focus:border-indigo-500 transition resize-y"
+                    placeholder="Enter SQLite query here (e.g. SELECT * FROM Part;)"></textarea>
+
+                <div class="mt-4 flex flex-wrap justify-between items-center gap-3">
+                    <div class="text-xs text-slate-400">
+                        Sends SQL string via JSON to <span class="font-code text-slate-300">events.execute_custom_query()</span>
+                    </div>
+                    <button onclick="runQuery()" id="runBtn" 
+                        class="bg-indigo-600 hover:bg-indigo-500 text-white font-medium px-5 py-2 rounded-lg text-sm transition flex items-center shadow-lg shadow-indigo-600/30">
+                        <i class="fa-solid fa-play mr-2"></i> Execute Query
+                    </button>
+                </div>
+            </div>
+
+            <!-- Query Response Banner -->
+            <div id="statusBanner" class="hidden rounded-xl p-4 border text-sm flex items-start space-x-3 transition-all">
+                <div id="statusIcon" class="mt-0.5 text-lg"></div>
+                <div class="flex-1">
+                    <h3 id="statusTitle" class="font-bold mb-0.5"></h3>
+                    <p id="statusMsg" class="font-code text-xs"></p>
+                </div>
+            </div>
+
+            <!-- Results Data Output Table / Raw JSON -->
+            <div class="bg-slate-800 rounded-xl border border-slate-700 p-5 shadow-sm flex-1 flex flex-col">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-sm font-semibold text-slate-300 uppercase tracking-wider flex items-center">
+                        <i class="fa-solid fa-list-check text-indigo-400 mr-2"></i> Response Data
+                    </h2>
+                    <div class="flex bg-slate-900 p-1 rounded-lg border border-slate-700/60 text-xs">
+                        <button id="viewTableBtn" onclick="toggleView('table')" class="px-3 py-1 rounded bg-indigo-600 text-white font-medium">Table View</button>
+                        <button id="viewJsonBtn" onclick="toggleView('json')" class="px-3 py-1 rounded text-slate-400 hover:text-white">JSON View</button>
+                    </div>
+                </div>
+
+                <!-- Table Container -->
+                <div id="tableView" class="overflow-x-auto flex-1 min-h-[220px]">
+                    <p class="text-slate-500 text-xs text-center py-12">No query executed yet. Run a query above to display results.</p>
+                </div>
+
+                <!-- Raw JSON View Container -->
+                <div id="jsonView" class="hidden flex-1 min-h-[220px]">
+                    <pre id="jsonContent" class="bg-slate-950 p-4 rounded-lg font-code text-xs text-indigo-300 overflow-x-auto border border-slate-700/60 max-h-[400px]">{}</pre>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <script>
+        let currentView = 'table';
+        let lastResponseData = null;
+
+        function setQuery(queryText) {
+            document.getElementById('sqlInput').value = queryText;
+        }
+
+        function clearConsole() {
+            document.getElementById('sqlInput').value = '';
+            document.getElementById('statusBanner').classList.add('hidden');
+        }
+
+        function toggleView(view) {
+            currentView = view;
+            const tableBtn = document.getElementById('viewTableBtn');
+            const jsonBtn = document.getElementById('viewJsonBtn');
+            const tableView = document.getElementById('tableView');
+            const jsonView = document.getElementById('jsonView');
+
+            if (view === 'table') {
+                tableBtn.className = "px-3 py-1 rounded bg-indigo-600 text-white font-medium";
+                jsonBtn.className = "px-3 py-1 rounded text-slate-400 hover:text-white";
+                tableView.classList.remove('hidden');
+                jsonView.classList.add('hidden');
+            } else {
+                jsonBtn.className = "px-3 py-1 rounded bg-indigo-600 text-white font-medium";
+                tableBtn.className = "px-3 py-1 rounded text-slate-400 hover:text-white";
+                jsonView.classList.remove('hidden');
+                tableView.classList.add('hidden');
+            }
+        }
+
+        async function runQuery() {
+            const queryStr = document.getElementById('sqlInput').value.trim();
+            const runBtn = document.getElementById('runBtn');
+            
+            if (!queryStr) {
+                showBanner(false, "Input Required", "Please enter an SQLite query to execute.");
+                return;
+            }
+
+            // Disable button and show spinner
+            runBtn.disabled = true;
+            runBtn.innerHTML = '<i class="fa-solid fa-spinner animate-spin mr-2"></i> Executing...';
+
+            try {
+                // Call POST endpoint in server.py
+                const response = await fetch('/api/query', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: queryStr })
+                });
+
+                const result = await response.json();
+                lastResponseData = result;
+
+                // Update JSON preview container
+                document.getElementById('jsonContent').textContent = JSON.stringify(result, null, 2);
+
+                if (result.success) {
+                    showBanner(true, "Query Successful", result.message);
+                    renderTable(result.data);
+                } else {
+                    showBanner(false, "Query Error", result.message);
+                    renderTable(null);
+                }
+
+            } catch (err) {
+                showBanner(false, "Network/Server Error", err.message);
+            } finally {
+                runBtn.disabled = false;
+                runBtn.innerHTML = '<i class="fa-solid fa-play mr-2"></i> Execute Query';
+            }
+        }
+
+        function showBanner(isSuccess, title, msg) {
+            const banner = document.getElementById('statusBanner');
+            const icon = document.getElementById('statusIcon');
+            const titleEl = document.getElementById('statusTitle');
+            const msgEl = document.getElementById('statusMsg');
+
+            banner.classList.remove('hidden', 'bg-emerald-950/60', 'border-emerald-500/40', 'text-emerald-200', 'bg-rose-950/60', 'border-rose-500/40', 'text-rose-200');
+
+            if (isSuccess) {
+                banner.classList.add('bg-emerald-950/60', 'border-emerald-500/40', 'text-emerald-200');
+                icon.innerHTML = '<i class="fa-solid fa-circle-check text-emerald-400"></i>';
+            } else {
+                banner.classList.add('bg-rose-950/60', 'border-rose-500/40', 'text-rose-200');
+                icon.innerHTML = '<i class="fa-solid fa-triangle-exclamation text-rose-400"></i>';
+            }
+
+            titleEl.textContent = title;
+            msgEl.textContent = msg;
+        }
+
+        function renderTable(data) {
+            const container = document.getElementById('tableView');
+
+            if (!data || (Array.isArray(data) && data.length === 0)) {
+                container.innerHTML = '<p class="text-slate-500 text-xs text-center py-12">Query executed successfully, but returned no rows.</p>';
+                return;
+            }
+
+            // Handle objects returned from mutation queries (e.g. affected_rows summary)
+            if (!Array.isArray(data) && typeof data === 'object') {
+                let html = '<div class="bg-slate-950 p-4 rounded-lg border border-slate-700/60 font-code text-xs space-y-1">';
+                for (const [key, val] of Object.entries(data)) {
+                    html += `<div class="flex justify-between py-1 border-b border-slate-800"><span class="text-slate-400">${key}:</span><span class="text-emerald-400 font-bold">${val}</span></div>`;
+                }
+                html += '</div>';
+                container.innerHTML = html;
+                return;
+            }
+
+            // Build dynamic HTML table for SELECT rows
+            const columns = Object.keys(data[0]);
+            let tableHtml = `
+                <table class="w-full text-left text-xs text-slate-300 border-collapse">
+                    <thead>
+                        <tr class="bg-slate-950 text-indigo-300 border-b border-slate-700">
+            `;
+            
+            columns.forEach(col => {
+                tableHtml += `<th class="px-4 py-2 font-mono uppercase tracking-wider">${col}</th>`;
+            });
+            
+            tableHtml += `</tr></thead><tbody class="divide-y divide-slate-800">`;
+
+            data.forEach((row, idx) => {
+                const bg = idx % 2 === 0 ? 'bg-slate-900/40' : 'bg-slate-900/10';
+                tableHtml += `<tr class="${bg} hover:bg-indigo-950/30 transition">`;
+                columns.forEach(col => {
+                    const val = row[col] === null ? '<span class="text-slate-600 font-italic">NULL</span>' : row[col];
+                    tableHtml += `<span class="px-4 py-2.5 font-code block">${val}</span>`;
+                });
+                tableHtml += `</tr>`;
+            });
+
+            tableHtml += `</tbody></table>`;
+            container.innerHTML = tableHtml;
+        }
+
+        async function checkDatabaseStatus() {
+            try {
+                const res = await fetch('/api/parts');
+                if (res.ok) {
+                    console.log("Database online.");
+                }
+            } catch (e) {
+                console.warn("DB check failed:", e);
+            }
+        }
+    </script>
+</body>
+</html>

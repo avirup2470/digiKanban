@@ -175,6 +175,52 @@ def serve_db():
     return send_from_directory('.', 'inventory.db', mimetype='application/x-sqlite3')
 
 # --- REST API ENDPOINTS ---
+@app.route('/api/query', methods=['POST'])
+def api_execute_query():
+    """
+    API endpoint to receive an SQLite query string from client requests,
+    execute it through events.py module, and return status, message, and data JSON.
+    
+    Expected JSON Body:
+    {
+        "query": "SELECT * FROM Part WHERE location = ?",
+        "params": ["Warehouse A"]  // optional bound parameters
+    }
+    
+    Response JSON:
+    {
+        "success": true | false,
+        "message": "Status description",
+        "data": [ ... ] | { "affected_rows": 1 } | null
+    }
+    """
+    payload = request.json or {}
+    query_str = payload.get('query')
+    params = payload.get('params', [])
+
+    if not query_str or not isinstance(query_str, str):
+        return jsonify({
+            "success": False,
+            "message": "Invalid request payload. 'query' field string is required.",
+            "data": None
+        }), 400
+
+    # Invoke events.py function to execute query
+    success, message, data = events.execute_custom_query(query_str, params)
+
+    status_code = 200 if success else 400
+    return jsonify({
+        "success": success,
+        "message": message,
+        "data": data
+    }), status_code
+
+
+
+
+
+
+
 
 @app.route('/api/parts', methods=['GET'])
 def api_get_parts():
@@ -185,6 +231,9 @@ def api_get_parts():
     parts = [dict(row) for row in cursor.fetchall()]
     conn.close()
     return jsonify(parts)
+
+
+
 
 @app.route('/api/cards', methods=['GET'])
 def api_get_cards():
