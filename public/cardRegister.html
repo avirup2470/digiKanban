@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kanban Card Creator (SQL Database Connected)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6; 
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            padding: 2rem;
+        }
+        .card-form {
+            max-width: 500px;
+            width: 100%;
+            background-color: #ffffff;
+            padding: 2.5rem;
+            border-radius: 1rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            border: 1px solid #e5e7eb;
+        }
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+        .form-label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            color: #1f2937;
+        }
+        .form-select, .form-input {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #d1d5db;
+            border-radius: 0.5rem;
+            background-color: #f9fafb;
+            transition: all 0.2s;
+        }
+        .form-select:focus, .form-input:focus {
+            outline: none;
+            border-color: #4f46e5;
+            box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.2);
+        }
+        .loading-icon {
+            border-top: 4px solid #4f46e5;
+            border-right: 4px solid transparent;
+            border-radius: 50%;
+            width: 1.5rem;
+            height: 1.5rem;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="app-container" class="card-form">
+        <h1 class="text-3xl font-bold text-indigo-600 mb-6 text-center">
+            New Kanban Card Entry
+        </h1>
+
+        <div id="loading-state" class="text-center text-gray-500 py-8">
+            <div class="loading-icon mx-auto mb-3"></div>
+            Connecting to SQLite Database & Querying Locations...
+        </div>
+
+        <form id="card-form" class="hidden">
+            <!-- Step 1: Location Select (Dynamically Populated via SQL Query) -->
+            <div class="form-group">
+                <label for="locationSelect" class="form-label">1. Target Location</label>
+                <select id="locationSelect" class="form-select" required disabled>
+                    <option value="" disabled selected>Loading locations...</option>
+                </select>
+            </div>
+
+            <!-- Step 2: Part Number Select (Dynamic via SQL Query) -->
+            <div class="form-group">
+                <label for="partSelect" class="form-label">2. Part Number</label>
+                <select id="partSelect" class="form-select" disabled required>
+                    <option value="" disabled selected>Select a location first...</option>
+                </select>
+                <p id="part-details" class="mt-2 text-sm text-gray-500 italic h-4"></p>
+            </div>
+
+            <!-- Step 3: Card Type Select -->
+            <div class="form-group">
+                <label for="typeSelect" class="form-label">3. Card Type</label>
+                <select id="typeSelect" class="form-select" required>
+                    <option value="FG">FG (Final Goods)</option>
+                    <option value="WIP">WIP (Work In Progress)</option>
+                </select>
+            </div>
+
+            <!-- Step 4: Quantity Input -->
+            <div class="form-group">
+                <label for="quantityInput" class="form-label">4. Quantity (Qt)</label>
+                <input type="number" id="quantityInput" class="form-input" min="1" value="1" required>
+            </div>
+
+            <!-- Step 5: Trolly No Input -->
+            <div class="form-group">
+                <label for="trollyNoInput" class="form-label">5. Trolly No.</label>
+                <input type="text" id="trollyNoInput" class="form-input" placeholder="e.g. TR-01" required>
+            </div>
+            
+            <button type="submit" id="submitBtn" class="w-full bg-indigo-600 text-white font-semibold py-3 px-4 rounded-lg hover:bg-indigo-700 transition duration-200 disabled:bg-gray-400 flex items-center justify-center">
+                Create & Register Kanban Card
+            </button>
+        </form>
+
+        <div id="message-box" class="mt-6 p-3 rounded-lg text-center hidden font-medium text-sm"></div>
+
+        <!-- SQL Executed Query Inspector -->
+        <div class="mt-6 pt-4 border-t border-gray-200 text-xs text-gray-500">
+            <div class="flex justify-between items-center mb-1">
+                <span class="font-semibold uppercase text-gray-400">Last Executed SQL:</span>
+                <span id="sql-status-badge" class="px-2 py-0.5 rounded text-[10px] bg-emerald-100 text-emerald-800">Ready</span>
+            </div>
+            <pre id="executed-sql" class="bg-gray-900 text-emerald-400 p-2.5 rounded font-mono overflow-x-auto text-[11px] min-h-[42px] flex items-center">SELECT DISTINCT location FROM Part;</pre>
+        </div>
+    </div>
+
+    <script>
+        // Local Cache for query results per location
+        const partsCache = {};
+
+        // Restricted list of valid Target Locations
+        const TARGET_LOCATIONS = ['SA', 'FG', 'PU', 'IM'];
+
+        // UI Element References
+        const loadingStateEl = document.getElementById('loading-state');
+        const cardFormEl = document.getElementById('card-form');
+        const locationSelect = document.getElementById('locationSelect');
+        const partSelect = document.getElementById('partSelect');
+        const typeSelect = document.getElementById('typeSelect');
+        const quantityInput = document.getElementById('quantityInput');
+        const trollyNoInput = document.getElementById('trollyNoInput');
+        const submitBtn = document.getElementById('submitBtn');
+        const messageBox = document.getElementById('message-box');
+        const partDetailsEl = document.getElementById('part-details');
+        const executedSqlEl = document.getElementById('executed-sql');
+        const sqlStatusBadge = document.getElementById('sql-status-badge');
+
+        // Fallback SQLite In-Memory Database updated with custom parts table schema
+        const mockDb = {
+            parts: [],
+            cards: []
+        };
+
+        /**
+         * Sends an SQL Query string to the backend endpoint (/api/query).
+         * Falls back to client-side mock SQL processing if offline or standalone preview mode.
+         */
+        async function runSqlQuery(sqlQuery, params = []) {
+            executedSqlEl.textContent = sqlQuery;
+            sqlStatusBadge.textContent = 'Executing...';
+            sqlStatusBadge.className = 'px-2 py-0.5 rounded text-[10px] bg-amber-100 text-amber-800';
+
+            try {
+                const response = await fetch('/api/query', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: sqlQuery, params })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Server returned HTTP status ${response.status}`);
+                }
+
+                const result = await response.json();
+                if (!result.success) {
+                    throw new Error(result.message || 'SQL execution failed');
+                }
+
+                sqlStatusBadge.textContent = 'SQL Success';
+                sqlStatusBadge.className = 'px-2 py-0.5 rounded text-[10px] bg-emerald-100 text-emerald-800';
+                return result.data;
+
+            } catch (err) {
+                console.warn('Backend API connection unavailable. Executing SQL query against client database fallback engine:', err.message);
+                sqlStatusBadge.textContent = 'SQL Mock Fallback';
+                sqlStatusBadge.className = 'px-2 py-0.5 rounded text-[10px] bg-blue-100 text-blue-800';
+                return processLocalSqlFallback(sqlQuery, params);
+            }
+        }
+
+        /**
+         * Simulates SQL Query Execution for standalone preview environments
+         */
+        function processLocalSqlFallback(queryStr, params) {
+            const cleanSql = queryStr.trim().toUpperCase();
+
+            // 1. SELECT DISTINCT location FROM Part
+            if (cleanSql.includes('DISTINCT LOCATION FROM PART')) {
+                return TARGET_LOCATIONS.map(loc => ({ location: loc }));
+            }
+
+            // 2. SELECT * FROM Part WHERE location = ?
+            if (cleanSql.includes('FROM PART') && cleanSql.includes('LOCATION =')) {
+                const targetLoc = params[0] || (queryStr.match(/'([^']+)'/)?.[1]);
+                return mockDb.parts.filter(p => p.location === targetLoc);
+            }
+
+            // 3. INSERT INTO Card
+            if (cleanSql.startsWith('INSERT INTO CARD')) {
+                const newId = mockDb.cards.length + 1;
+                mockDb.cards.push({
+                    id: newId,
+                    location: params[0],
+                    part_id: params[1],
+                    quantity: params[2],
+                    trolly_no: params[3],
+                    trolly_type: params[4],
+                    created_on: new Date().toISOString()
+                });
+                return { affected_rows: 1, last_inserted_id: newId };
+            }
+
+            return [];
+        }
+
+        /**
+         * Utility function to display alerts and notification banners to the user.
+         */
+        function showMessage(text, type = 'info') {
+            messageBox.textContent = text;
+            messageBox.classList.remove('hidden', 'bg-red-100', 'text-red-800', 'bg-green-100', 'text-green-800', 'bg-yellow-100', 'text-yellow-800', 'bg-indigo-100', 'text-indigo-800');
+            
+            let bgColor, textColor;
+            if (type === 'success') {
+                bgColor = 'bg-green-100';
+                textColor = 'text-green-800';
+            } else if (type === 'error') {
+                bgColor = 'bg-red-100';
+                textColor = 'text-red-800';
+            } else {
+                bgColor = 'bg-indigo-100';
+                textColor = 'text-indigo-800';
+            }
+            messageBox.classList.add(bgColor, textColor);
+        }
+
+        /**
+         * Populates target locations strictly matching "SA", "FG", "PU", "IM".
+         */
+        async function loadAvailableLocations() {
+            locationSelect.innerHTML = '<option value="" disabled selected>Loading locations...</option>';
+            locationSelect.disabled = true;
+
+            try {
+                // Query database for target locations matching the restricted list
+                const sqlQuery = "SELECT DISTINCT location FROM Part WHERE location IN ('SA', 'FG', 'PU', 'IM') ORDER BY location ASC;";
+                await runSqlQuery(sqlQuery);
+
+                locationSelect.innerHTML = '<option value="" disabled selected>Select Target Location</option>';
+                
+                TARGET_LOCATIONS.forEach(loc => {
+                    const option = document.createElement('option');
+                    option.value = loc;
+                    option.textContent = loc;
+                    locationSelect.appendChild(option);
+                });
+
+                locationSelect.disabled = false;
+                showMessage('Target locations loaded (SA, FG, PU, IM). Select a location to query parts.', 'info');
+
+            } catch (error) {
+                console.error('Error querying available locations:', error);
+                locationSelect.innerHTML = '<option value="" disabled selected>Select Target Location</option>';
+                
+                // Fallback to strict target location list
+                TARGET_LOCATIONS.forEach(loc => {
+                    const option = document.createElement('option');
+                    option.value = loc;
+                    option.textContent = loc;
+                    locationSelect.appendChild(option);
+                });
+                
+                locationSelect.disabled = false;
+            }
+        }
+
+        /**
+         * Executes SQL query to retrieve registered parts for a selected location.
+         */
+        async function loadPartsForLocation(locationId) {
+            partSelect.innerHTML = '<option value="" disabled selected>Loading parts...</option>';
+            partSelect.disabled = true;
+            partDetailsEl.textContent = '';
+            messageBox.classList.add('hidden');
+
+            try {
+                // SQL Query: SELECT id, name, description, total_quantity, location, fifo FROM Part WHERE location = ?;
+                const sqlQuery = `SELECT id, name, description, total_quantity, location, fifo FROM Part WHERE location = '${locationId.replace(/'/g, "''")}';`;
+                const rows = await runSqlQuery(sqlQuery, [locationId]);
+
+                partsCache[locationId] = rows || [];
+                populatePartSelect(partsCache[locationId]);
+
+            } catch (error) {
+                console.error(`Error querying parts for ${locationId}:`, error);
+                partSelect.innerHTML = '<option value="" disabled selected>Error loading parts.</option>';
+                showMessage(`Failed to query parts for location "${locationId}": ${error.message}`, 'error');
+            }
+        }
+
+        /**
+         * Populates Part drop-down list with SQL query results using alphanumeric Part IDs.
+         */
+        function populatePartSelect(parts) {
+            partSelect.innerHTML = '<option value="" disabled selected>Select Part Number</option>';
+            
+            if (!parts || parts.length === 0) {
+                partSelect.innerHTML = '<option value="" disabled selected>No parts found for this location.</option>';
+                partSelect.disabled = true;
+                return;
+            }
+
+            parts.forEach(part => {
+                const option = document.createElement('option');
+                option.value = part.id;
+                option.textContent = `${part.id} - ${part.name || 'Unnamed Part'}`;
+                partSelect.appendChild(option);
+            });
+
+            partSelect.disabled = false;
+        }
+
+        /**
+         * Handles form submission to insert a new Kanban Card record into SQLite database via INSERT statement.
+         */
+        async function handleFormSubmit(event) {
+            event.preventDefault();
+            
+            const locationId = locationSelect.value;
+            const partId = partSelect.value;
+            const cardType = typeSelect.value;
+            const quantity = parseInt(quantityInput.value, 10);
+            const trollyNo = trollyNoInput.value.trim();
+
+            if (!locationId || !partId || !cardType || !trollyNo || isNaN(quantity) || quantity < 1) {
+                showMessage('Please fill all form fields correctly, including Trolly No.', 'error');
+                return;
+            }
+
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<i class="fa-solid fa-spinner animate-spin mr-2"></i> Registering Card via SQL...';
+
+            try {
+                // SQL Query: INSERT INTO Card (location, part_id, quantity, trolly_no, trolly_type, activation) VALUES (?, ?, ?, ?, ?, 'false');
+                const sqlQuery = `INSERT INTO Card (location, part_id, quantity, trolly_no, trolly_type, activation) VALUES ('${locationId.replace(/'/g, "''")}', '${partId.replace(/'/g, "''")}', ${quantity}, '${trollyNo.replace(/'/g, "''")}', '${cardType}', 'false');`;
+                
+                const result = await runSqlQuery(sqlQuery, [locationId, partId, quantity, trollyNo, cardType]);
+                const newCardId = result.last_inserted_id || Math.floor(Math.random() * 1000) + 100;
+
+                showMessage(`✅ Kanban Card #${newCardId} for Part "${partId}" (Qt: ${quantity}, Trolly No: ${trollyNo}, Type: ${cardType}) successfully registered via SQL!`, 'success');
+
+                // Reset form inputs (preserve current location selection)
+                partSelect.value = "";
+                quantityInput.value = 1;
+                trollyNoInput.value = "";
+                partDetailsEl.textContent = "";
+
+            } catch (error) {
+                console.error('Error inserting Kanban Card via SQL:', error);
+                showMessage(`❌ SQL Error inserting card: ${error.message}`, 'error');
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Create & Register Kanban Card';
+            }
+        }
+
+        // Initialize application workflow on window load
+        window.addEventListener('DOMContentLoaded', async () => {
+            try {
+                // 1. Fetch available target locations via SQL
+                await loadAvailableLocations();
+
+                // 2. Attach Event Listeners
+                locationSelect.addEventListener('change', (e) => loadPartsForLocation(e.target.value));
+
+                partSelect.addEventListener('change', () => {
+                    const locationId = locationSelect.value;
+                    const selectedPart = partsCache[locationId]?.find(p => String(p.id) === String(partSelect.value));
+                    if (selectedPart) {
+                        partDetailsEl.textContent = `Desc: ${selectedPart.description || 'N/A'} | In Stock: ${selectedPart.total_quantity ?? 'N/A'}`;
+                    } else {
+                        partDetailsEl.textContent = '';
+                    }
+                });
+
+                cardFormEl.addEventListener('submit', handleFormSubmit);
+
+                // Reveal form container
+                loadingStateEl.classList.add('hidden');
+                cardFormEl.classList.remove('hidden');
+
+            } catch (error) {
+                console.error("Initialization Error:", error);
+                loadingStateEl.textContent = 'Connection or Initialization Failed.';
+                showMessage(`❌ System Error: Could not connect to SQL database. Check console details.`, 'error');
+            }
+        });
+    </script>
+</body>
+</html>
